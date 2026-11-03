@@ -93,41 +93,11 @@ function cancelJob() {
 }
 id('cancel').onclick = cancelJob;
 
-const sentenceSplitter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter('en',{granularity:'sentence'}) : null;
-function sentenceParts(text) {
-  if (sentenceSplitter) return Array.from(sentenceSplitter.segment(text), item => item.segment.trim()).filter(Boolean);
-  return text.split(/(?<=[。！？])|(?<=[.!?])\s+/u).map(s => s.trim()).filter(Boolean);
-}
 async function makeLines(messages, tell) {
-  // Track original units through the translator, which may return several cues for one Chinese unit.
-  // English-only units are copied directly, including punctuation and capitalization.
-  const units = [];
-  for (const {speaker,text} of messages) {
-    for (const line of text.split(/\r?\n/u)) {
-      for (const part of sentenceParts(line)) units.push({speaker,text:part});
-    }
-  }
-  if (units.length > 200) throw Error('超过 200 句，请选取较短的一段对话。');
-  const needsEnglish = [];
-  const perUnit = units.map((unit, i) => {
-    if (han.test(unit.text)) {
-      needsEnglish.push({speaker:String(i),text:unit.text});
-      return [];
-    }
-    return [{speaker:unit.speaker,zh:unit.text,en:unit.text}];
-  });
-  if (needsEnglish.length) {
-    const translated = await translateLocally(needsEnglish, info => tell(typeof info === 'string' ? info : info.message));
-    for (const line of translated) {
-      const i = Number(line.speaker), unit = units[i];
-      if (!unit || !han.test(unit.text) || !line.en?.trim()) throw Error('本机翻译没有返回完整内容，请重试。');
-      perUnit[i].push({speaker:unit.speaker,zh:line.zh,en:line.en});
-    }
-  }
-  if (!units.length || perUnit.some(group => !group.length)) throw Error('部分句子没有可朗读的英文，请检查原文。');
-  const cards = perUnit.flat();
-  if (cards.length > 200) throw Error('超过 200 句，请选取较短的一段对话。');
-  return cards;
+  const lines = await translateLocally(messages, progress => tell(typeof progress === 'string' ? progress : progress.message));
+  if (!lines.length || lines.some(line => !line.en?.trim())) throw Error('部分句子没有可朗读的英文，请检查原文。');
+  // The translator preserves exact source spans and skips inference on English.
+  return lines.map(line => han.test(line.zh) ? line : {...line,en:line.zh});
 }
 async function voiceLine(line, voice, tell) {
   let timer, arm;

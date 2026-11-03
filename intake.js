@@ -1,8 +1,12 @@
-// Read only the conversation text. All parsing and ZIP decompression stay in the browser.
-const MiB = 1024 * 1024
-const MAX_TEXT = 2 * MiB, MAX_ARCHIVE = 256 * MiB, MAX_ITEMS = 5000
+// Pasted text stays in the page; this module does no I/O.
+const MAX_TEXT = 2*1024*1024, MAX_ITEMS = 5000
 const LABEL = /^[·•](.+)$/u
-const DATE = /^\d{4}(?:年\d{1,2}月\d{1,2}日|[-/]\d{1,2}[-/]\d{1,2})\s+\d{1,2}:\d{2}(?::\d{2})?$/u
+const DAY = /\d{4}(?:年\d{1,2}月\d{1,2}日|[-/]\d{1,2}[-/]\d{1,2})/u.source
+const TIME = /(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?/u.source
+const DATE = new RegExp('^'+DAY+'\\s+'+TIME+'$','u')
+const BARE_TIME = new RegExp('^(?:'+DAY+'\\s+)?'+TIME+'$','u')
+const STAMPED = new RegExp('^(.+?)\\s+(?:'+DAY+'\\s+)?'+TIME+'$','u')
+const URL_OR_CLOCK = /^(?:[a-z][\w+.-]*:\/\/|(?:mailto|tel|file|data|blob|sms|urn|about):|\/\/|www\.|(?:[\w-]+\.)+[a-z]{2,}(?:[:/]|$)|\d{1,2}:\d{2}(?:\D|$))/iu
 const MEDIA = /^\[(?:图片|视频|文件|动画表情|表情包|语音|语音通话|视频通话|位置|名片|小程序|链接)\](?:[ \t][^\n]*)?$/u
 const MEDIA_TYPES = new Set(['image', 'voice', 'video', 'file', 'location', 'link', 'business_card', 'miniprogram', 'emoji', 'channels_shop_product', 'channels_shop_order', 'finder'])
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -29,6 +33,47 @@ function parseMerged(value, add, skip, depth = 0) {
   }
 }
 
+// Choose a source format from the first named record. In timestamped mode, only
+// that format starts a new turn, so URLs and colons in the body stay ordinary text.
+function readNamedLines(raw, add) {
+  const lines = raw.split('\n')
+  const missing = () => fail('有消息缺少可确认的昵称。请把每条整理为「昵称：内容」后再粘贴。')
+  function header(i) {
+    const line = lines[i].trim()
+    if (!line || BARE_TIME.test(line) || URL_OR_CLOCK.test(line)) return null
+    const marked = LABEL.exec(line)
+    const stamped = STAMPED.exec(line)
+    if (!marked && stamped && !/[：:]/u.test(stamped[1])) {
+      return {mode:'inline',name:stamped[1].trim(),until:i}
+    }
+    if (!marked && /[：:]/u.test(line)) return null
+    let j = i+1
+    while (j<lines.length && !lines[j].trim()) j++
+    if (!DATE.test(lines[j]?.trim() || '')) return null
+    return {mode:marked?'marked':'stacked',name:marked?marked[1].trim():line,until:j}
+  }
+  const mode = header(0)?.mode || 'colon'
+  let speaker = null, body = []
+  function finish() { if (speaker !== null) add(speaker,body.join('\n')) }
+  for (let i=0;i<lines.length;i++) {
+    const line=lines[i], trimmed=line.trim()
+    const indented = speaker !== null && /^(?:\t| {4})/u.test(line)
+    const native=mode==='colon' && indented ? null : header(i)
+    if (native) {
+      if (mode !== native.mode) fail('聊天混用了几种排版，请按「昵称：内容」分别整理后粘贴。')
+      if (!native.name || URL_OR_CLOCK.test(native.name) || BARE_TIME.test(native.name)) missing()
+      finish(); speaker=native.name; body=[]; i=native.until; continue
+    }
+    if (mode==='marked' && LABEL.test(trimmed)) fail('昵称下面缺少完整日期和时间，请核对原文。')
+    const field = mode==='colon' && !indented && !URL_OR_CLOCK.test(trimmed) && !BARE_TIME.test(trimmed)
+      ? /^\s*([^：:\n]{1,128})[：:](?!\/\/)(.*)$/u.exec(line) : null
+    if (field) { finish(); speaker=field[1].trim(); body=[field[2]]; continue }
+    if (speaker===null || (mode!=='colon' && BARE_TIME.test(trimmed))) missing()
+    body.push(line)
+  }
+  finish()
+}
+
 export function parseText(input) {
   if (typeof input !== 'string') fail('请提供聊天文字。')
   if (input.length > MAX_TEXT || new TextEncoder().encode(input).length > MAX_TEXT) fail('聊天文字超过 2 MiB，请分段导入。')
@@ -49,115 +94,8 @@ export function parseText(input) {
   if (raw[0] === '{' || raw[0] === '[' && /^\[\s*[\[{"\]]/.test(raw)) {
     parseMerged(parseJSON(raw, '无法解析 JSON，请检查文件是否完整。'), add, skip)
   } else {
-    const lines = raw.split('\n')
-    const dated = LABEL.test(lines[0].trim())
-    let speaker = null, body = []
-    function finish() { if (speaker !== null) add(speaker, body.join('\n')) }
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i], label = LABEL.exec(line.trim())
-      if (dated && label) {
-        if (!DATE.test((lines[i + 1] ?? '').trim())) fail('微信导出的发言人后缺少日期时间，请检查原记录。')
-        finish(); speaker = label[1].trim(); body = []; i++; continue
-      }
-      if (!dated && label && DATE.test((lines[i + 1] ?? '').trim())) fail('聊天文字混用了不同格式，请分别导入。')
-      const indented = speaker !== null && /^(?:\t| {4})/u.test(line)
-      const field = !dated && !indented && !/^\s*(?:[a-z][\w+.-]*:\/\/|\d{1,2}:\d{2}(?:\D|$))/iu.test(line)
-        ? /^\s*([^：:\n]{1,128})[：:](.*)$/u.exec(line) : null
-      if (field) { finish(); speaker = field[1].trim(); body = [field[2]]; continue }
-      if (speaker === null) fail('未找到发言人。请按每行「名字：内容」粘贴，或选择微信导出的聊天记录。')
-      body.push(line)
-    }
-    finish()
+    readNamedLines(raw,add)
   }
   if (!messages.length) fail('记录中没有可朗读的文字消息。')
   return { messages, skipped }
-}
-
-function decode(bytes) {
-  const [a, b] = bytes
-  const encodings = a === 0xff && b === 0xfe ? ['utf-16le'] : a === 0xfe && b === 0xff ? ['utf-16be'] : ['utf-8', 'gb18030']
-  for (const encoding of encodings) {
-    try { return new TextDecoder(encoding, { fatal: true }).decode(bytes) } catch { /* try next encoding */ }
-  }
-  fail('无法识别文件编码，请另存为 UTF-8 的 TXT。')
-}
-
-const u16 = (v, i) => v.getUint16(i, true)
-const u32 = (v, i) => v.getUint32(i, true)
-const view = bytes => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-const bytesAt = async (file, start, length) => new Uint8Array(await file.slice(start, start + length).arrayBuffer())
-const badZip = () => fail('ZIP 结构损坏或不受支持，请解压后选择聊天 TXT。')
-
-async function zipTranscript(file) {
-  if (file.size > MAX_ARCHIVE) fail('ZIP 超过 256 MiB，请解压后导入聊天 TXT。')
-  const tail = await bytesAt(file, Math.max(0, file.size - 65557), 65557)
-  const end = view(tail)
-  let i = tail.length - 22
-  while (i >= 0 && !(u32(end, i) === 0x06054b50 && i + 22 + u16(end, i + 20) === tail.length)) i--
-  if (i < 0 || u16(end,i+4) || u16(end,i+6)) badZip()
-  const count = u16(end,i+10), size = u32(end,i+12), offset = u32(end,i+16)
-  if (!count || count !== u16(end,i+8) || count > 12000 || size > 8 * MiB || offset + size !== file.size - tail.length + i) badZip()
-  const dir = await bytesAt(file, offset, size), d = view(dir), choices = []
-  let j = 0
-  for (let k = 0; k < count; k++) {
-    if (j + 46 > size || u32(d,j) !== 0x02014b50) badZip()
-    const chars = u16(d,j+28), next = j + 46 + chars + u16(d,j+30) + u16(d,j+32)
-    if (next > size) badZip()
-    const nameBytes = dir.subarray(j+46,j+46+chars)
-    // ZIPs may contain unrelated legacy-encoded media names. Only inspect TXT entries.
-    if (chars >= 4 && String.fromCharCode(...nameBytes.subarray(-4)).toLowerCase() === '.txt') {
-      const name = decode(nameBytes).replace(/\\/g,'/'), path = name.split('/'), base = path.at(-1)
-      if (!path.some(s => /^(?:__MACOSX|\.\.?|attachments?|media|聊天记录内的图片、视频和文件)$/iu.test(s)) && !base.startsWith('._')) {
-        choices.push({ base, nameBytes, flags:u16(d,j+8), method:u16(d,j+10), crc:u32(d,j+16),
-          compressed:u32(d,j+20), length:u32(d,j+24), position:u32(d,j+42) })
-      }
-    }
-    j = next
-  }
-  if (j !== size) badZip()
-  const preferred = choices.filter(c => c.base === '聊天记录.txt')
-  const selected = preferred.length ? preferred : choices
-  if (selected.length !== 1) fail('ZIP 内没有唯一可识别的聊天 TXT，请解压后选择目标文件。')
-  const c = selected[0]
-  if (c.flags & 1 || ![0,8].includes(c.method)) fail('不支持加密 ZIP 或这种压缩方式，请解压后选择 TXT。')
-  if (c.length > MAX_TEXT || c.compressed > MAX_TEXT + 65536) fail('聊天 TXT 超过导入限制，请分段导入。')
-  const local = await bytesAt(file,c.position,30)
-  if (local.length !== 30) badZip()
-  const h = view(local), nameLen = u16(h,26), start = c.position + 30 + nameLen + u16(h,28)
-  if (u32(h,0) !== 0x04034b50 || u16(h,6) !== c.flags || u16(h,8) !== c.method || start+c.compressed > offset || nameLen !== c.nameBytes.length) badZip()
-  const localName = await bytesAt(file,c.position+30,nameLen)
-  if (!localName.every((b,k) => b === c.nameBytes[k])) badZip()
-  let stream = file.slice(start,start+c.compressed).stream()
-  if (c.method === 8) {
-    try { stream = stream.pipeThrough(new DecompressionStream('deflate-raw')) }
-    catch { fail('当前浏览器无法解压，请解压后导入聊天 TXT。') }
-  }
-  const out = new Uint8Array(c.length), reader = stream.getReader()
-  let used = 0
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (used+value.length > out.length) { await reader.cancel(); badZip() }
-      out.set(value,used); used += value.length
-    }
-  } catch { badZip() } finally { reader.releaseLock() }
-  if (used !== out.length) badZip()
-  let crc = -1
-  for (const byte of out) {
-    crc ^= byte
-    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
-  }
-  if ((~crc >>> 0) !== c.crc) badZip()
-  return out
-}
-
-export async function readChatFile(file) {
-  if (!file?.size || typeof file.name !== 'string') fail('请选择非空的 TXT、ZIP 或 JSON 文件。')
-  if (/\.zip$/iu.test(file.name)) return parseText(decode(await zipTranscript(file)))
-  if (!/\.(?:txt|json)$/iu.test(file.name)) fail('请选择 TXT、ZIP 或微信合并记录 JSON。')
-  if (file.size > MAX_TEXT) fail('聊天文件超过 2 MiB，请分段导入。')
-  const text = decode(new Uint8Array(await file.arrayBuffer()))
-  if (/\.json$/iu.test(file.name) && !text.trimStart().startsWith('{')) fail('JSON 不是可导入的微信合并聊天记录。')
-  return parseText(text)
 }
