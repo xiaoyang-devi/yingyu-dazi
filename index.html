@@ -10,8 +10,8 @@
   <meta name="apple-mobile-web-app-title" content="英语搭子">
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="./style.css?v=4">
-  <script type="module" src="./app.js?v=4.1"></script>
+  <link rel="stylesheet" href="./style.css?v=5">
+  <script type="module" src="./app.js?v=5.1"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -40,7 +40,12 @@
       <p id="nativeSupport" class="small" role="status" hidden></p>
       <details id="roles" hidden><summary><span>角色与声音 <small id="peopleCount"></small></span><span class="adjust">调整</span></summary><div id="cast"></div><p class="small" id="roleHint">按发言顺序分配声音，可为每个人重新选择。</p></details>
       <div class="generate-bar"><div class="download-note"><strong id="downloadTitle">首次生成约需下载 250 MB</strong><span id="downloadNote">中文由 Marian 翻译，英语由 Kokoro 配音。纯英文句直接朗读。建议连接 Wi-Fi，生成时保持页面打开，练习时对照原文核对译意。</span></div><button id="generate" class="primary" type="button"><span aria-hidden="true">▷</span> 生成英语听力卡</button></div>
-      <div class="job-line"><p id="progress" aria-live="polite" role="status"></p><button id="cancel" type="button" class="plain" hidden>取消生成</button></div>
+      <div id="jobProgress" class="job-progress" role="group" aria-labelledby="jobStage" hidden>
+        <div class="job-top"><div><span class="job-label">制作进度</span><strong id="jobStage">准备制作</strong></div><span id="jobMetric"></span></div>
+        <div class="job-track"><progress id="jobBar" max="100" aria-labelledby="jobStage" aria-describedby="jobDetail"></progress></div>
+        <div class="job-bottom"><p id="jobDetail"></p><button id="cancel" type="button" class="plain" hidden>取消生成</button></div>
+      </div>
+      <div class="job-line"><p id="progress" aria-live="polite" aria-atomic="true" role="status"></p></div>
     </section>
     <section class="work-card player" id="player" aria-labelledby="cardTitle" hidden>
       <div class="player-heading"><div class="section-head"><div class="kicker">02 <span></span> LISTEN</div><h2 id="cardTitle" tabindex="-1"></h2><p id="cardMeta" class="small"></p></div><button type="button" class="plain save" id="saveCard" hidden>保存跟读文件</button></div>

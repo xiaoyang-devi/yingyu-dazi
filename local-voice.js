@@ -31,7 +31,7 @@ function getWorker() {
   if (!globalThis.isSecureContext || !globalThis.Worker || !globalThis.WebAssembly) {
     throw new Error("本机配音需要支持 WebAssembly 的新版浏览器，并通过 HTTPS 或本机地址打开。");
   }
-  const active = new Worker(new URL("./voice-worker.js?v=3",import.meta.url),{type:"module",name:"local-english-voice"});
+  const active = new Worker(new URL("./voice-worker.js?v=4",import.meta.url),{type:"module",name:"local-english-voice"});
   worker = active;
   active.addEventListener("message",({data})=>{
     if (worker !== active) return;
@@ -39,7 +39,7 @@ function getWorker() {
     if (!request) return;
     if (typeof data.status === "string") {
       watch();
-      try { request.onProgress?.(data.status); } catch { /* Optional UI callback. */ }
+      try { request.onProgress?.(data.status,data.detail); } catch { /* Optional UI callback. */ }
       return;
     }
     pending.delete(data.id);

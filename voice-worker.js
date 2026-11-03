@@ -1,3 +1,4 @@
+import {modelFileProgress} from './model-progress.js';
 // Pinned browser bundle from the Kokoro authors. The phonemizer and tokenizer run here.
 const PACKAGE = "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js";
 const WASM = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1/dist/";
@@ -37,6 +38,8 @@ const modelFiles = new Set([
 ]);
 const runtimeFiles = new Set(["ort-wasm-simd-threaded.jsep", "ort-wasm-simd-threaded", "ort-wasm-simd", "ort-wasm"]
   .flatMap(stem => [WASM+stem+".wasm", WASM+stem+".mjs"]));
+const coreSizes = {"config.json":44, "tokenizer_config.json":113, "tokenizer.json":3497, "onnx/model_quantized.onnx":92361116};
+let progress;
 const http = self.fetch.bind(self);
 self.fetch = (input, options = {}) => {
   const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url, self.location.href);
@@ -54,6 +57,10 @@ self.fetch = (input, options = {}) => {
   }
   if (!target && runtimeFiles.has(url.href)) target = url.href;
   if (!target) throw new Error("本机语音组件阻止了非模型请求。");
+  if (method === "GET") {
+    if (runtimeFiles.has(target)) progress.prepare("正在载入本机语音运行组件，浏览器未报告此步骤的进度…");
+    else progress.request(target.slice((base+REV+"/").length));
+  }
   // Send no request bodies, caller headers or cookies, including when input is a Request.
   return http(target, {method,credentials:"omit",referrerPolicy:"no-referrer",signal:options.signal || input.signal});
 };
@@ -65,23 +72,19 @@ try {
 let engine;
 let queue=Promise.resolve();
 let notify=()=>{};
-let lastPct=-1;
+
 function load() {
   if (!engine) {
     engine=(async()=>{
-      notify("正在加载本机语音组件…");
+      progress = modelFileProgress(coreSizes, "语音", detail => notify(detail.message,detail));
+      progress.prepare("正在打开本机语音组件…");
       const {KokoroTTS,env}=await import(PACKAGE);
       // This published Kokoro bundle exposes only wasmPaths. Its bundled ORT
       // selects one thread in a non-cross-origin-isolated worker (including standalone iOS).
       env.wasmPaths = WASM;
-      notify("正在准备英语语音模型，首次使用需要下载…");
-      return KokoroTTS.from_pretrained(MODEL,{device:"wasm",dtype:"q8",progress_callback(e){
-        if(e.status==="progress" && e.file?.endsWith(".onnx") && e.total>0){
-          const pct=Math.min(100,Math.floor(100*e.loaded/e.total));
-          if(pct!==lastPct){lastPct=pct;notify("正在加载语音模型 "+pct+"%");}
-        }
-      }});
-    })().catch(error=>{engine=undefined;lastPct=-1;throw error;});
+      progress.prepare("正在检查本机缓存并准备语音模型…");
+      return KokoroTTS.from_pretrained(MODEL,{device:"wasm",dtype:"q8",progress_callback:progress.observe});
+    })().catch(error=>{engine=undefined;throw error;});
   }
   return engine;
 }
@@ -124,13 +127,14 @@ function wav(parts, rate) {
 }
 
 async function render({id,text,voice}) {
-  notify=status=>self.postMessage({id,status});
+  notify=(status,detail)=>self.postMessage({id,status,detail});
   try{
     if(!voiceFiles.has(voice) || typeof text!=="string" || !text.trim() || text.length>12000)throw new Error("无效的语音或台词。");
     const tts=await load();
     const chunks=segments(text),parts=[];
     for(let i=0;i<chunks.length;i++){
-      notify(chunks.length>1?"正在本机配音 "+(i+1)+" / "+chunks.length:"正在本机配音…");
+      const status=chunks.length>1?"正在本机配音 "+(i+1)+" / "+chunks.length:"正在本机配音…";
+      notify(status,{stage:"synthesize",phase:"synthesize",unit:"segments",loaded:i,total:chunks.length,message:status});
       const audio=await tts.generate(chunks[i],{voice,speed:.92});
       if(audio.sampling_rate!==24000 || !audio.audio?.length)throw new Error("语音输出为空，请重试。");
       parts.push(audio.audio);

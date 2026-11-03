@@ -1,6 +1,6 @@
 import {parseText} from './intake.js?v=4';
-import {translateLocally, cancelLocalTranslation} from './local-translate.js';
-import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=3';
+import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=5';
+import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=5';
 import {localEnglishVoices, createLocalReader} from './native-speech.js';
 
 const id = key => document.getElementById(key);
@@ -27,6 +27,80 @@ let cardVersion = 0, demoVersion = 0, saving = false;
 function note(node, message, error = false) {
   node.textContent = message;
   node.dataset.kind = error ? 'error' : 'info';
+}
+// Percentages are local to the current measured operation, never a time estimate.
+function resetJobProgress() {
+  const panel = id('jobProgress');
+  panel.hidden = true;
+  delete panel.dataset.stage;
+  delete panel.dataset.phase;
+  delete panel.dataset.indeterminate;
+  id('jobBar').removeAttribute('value');
+  id('jobBar').removeAttribute('aria-valuetext');
+  id('jobMetric').textContent = id('jobDetail').textContent = '';
+  note(id('progress'),'');
+}
+function megabytes(bytes) {
+  return (bytes / 1000000).toLocaleString('zh-CN',{maximumFractionDigits:bytes < 1000000 ? 2 : 1}) + ' MB';
+}
+function showJob(stage,phase,title,message,measure = {}) {
+  const panel = id('jobProgress'), bar = id('jobBar');
+  const first = panel.hidden, change = first || panel.dataset.stage !== stage || panel.dataset.phase !== phase;
+  panel.hidden = false;
+  panel.dataset.stage = stage;
+  panel.dataset.phase = phase;
+  id('jobStage').textContent = title;
+  const {loaded,total,unit} = measure;
+  const hasLoaded = Number.isFinite(loaded) && loaded >= 0;
+  const measured = hasLoaded && Number.isFinite(total) && total > 0 && loaded <= total;
+  const bytes = unit === 'bytes', counted = unit === 'lines';
+  const fraction = measured && (bytes || counted || unit === 'complete') ? Math.floor(100*loaded/total) : null;
+  let metric = '', detail = message || '正在设备上处理…';
+  if (bytes && hasLoaded) {
+    let size = '模型文件已准备 ' + megabytes(loaded) + (measured ? ' / ' + megabytes(total) : '');
+    if (Number.isFinite(measure.cachedBytes) && measure.cachedBytes > 0 && measure.cachedBytes < loaded) {
+      size += '，其中缓存 ' + megabytes(measure.cachedBytes);
+    }
+    detail = size + '。' + detail;
+    if (fraction === null) metric = megabytes(loaded);
+  }
+  if (counted && measured) metric = loaded + ' / ' + total;
+  else if (fraction !== null) metric = fraction + '%';
+  id('jobMetric').textContent = metric;
+  id('jobDetail').textContent = detail;
+  panel.dataset.indeterminate = String(fraction === null);
+  if (fraction === null) bar.removeAttribute('value'); else bar.value = fraction;
+  bar.setAttribute('aria-valuetext',metric ? metric + '。' + detail : detail);
+  // Use the live region for stage changes only, so screen readers do not announce every network chunk.
+  if (change) note(id('progress'),title);
+  if (first) {
+    const bounds = panel.getBoundingClientRect();
+    if (bounds.bottom > (window.visualViewport?.height || innerHeight)-8 || bounds.top < 0) {
+      panel.scrollIntoView({block:'nearest',behavior:'auto'});
+    }
+  }
+}
+function showModel(stage,info) {
+  const model = stage === 'voice-model' ? '配音模型' : '翻译模型';
+  const phase = info.cached ? 'cache' : info.phase || 'prepare';
+  const verb = phase === 'cache' ? '读取缓存中的' : phase === 'download' ? '下载或读取' : '准备';
+  // Some older workers only return message strings. They cannot supply a measurable total.
+  const message = String(info.message || '正在本机准备模型文件。').replace(/\s*[·•]?\s*\d+(?:\.\d+)?\s*%/g,'').trim();
+  showJob(stage,phase,verb + model,message,info);
+}
+function showTranslation(info) {
+  const data = typeof info === 'string' ? {message:info} : info;
+  if (data.stage === 'translate') showJob('translate',data.phase || 'translate','逐句翻译',data.message,data);
+  else showModel('translation-model',data);
+}
+function showSpeech(index,total,line,message) {
+  const context = '第 ' + (index+1) + ' 句 · ' + line.speaker;
+  showJob('synthesize','synthesize','逐句配音',message ? context + '。' + message : context + ' 正在设备上合成。',
+    {unit:'lines',loaded:index,total});
+}
+function finishJob(summary) {
+  showJob('complete','complete','制作完成',summary,{unit:'complete',loaded:1,total:1});
+  note(id('progress'),summary);
 }
 function buildRoles(names, force = false) {
   const people = corpus?.people || names;
@@ -89,7 +163,7 @@ function changeEngine() {
     ? '仅使用设备已有的本地英语声音。纯英文可直接练习；中文首次仍需下载约 130 MB 的翻译模型。轻量模式不保存音频。'
     : kokoroNote;
   id('generate').textContent = native ? '▷ 准备轻量朗读' : '▷ 生成英语听力卡';
-  note(id('progress'),'');
+  resetJobProgress();
   refreshVoices(true);
   scan();
 }
@@ -192,6 +266,7 @@ id('chatFile').onchange = async event => {
   event.target.value = '';
   if (!file || working) return;
   const ticket = ++importTicket;
+  resetJobProgress();
   setReading(true);
   note(id('fileStatus'),'正在本机读取聊天文字…');
   try {
@@ -205,7 +280,7 @@ id('chatFile').onchange = async event => {
     cachedTranslation = null;
     resetSource(source.value,result);
     scan();
-    note(id('progress'),'');
+    resetJobProgress();
     note(id('fileStatus'),'已导入 ' + result.messages.length + ' 条文字、' + speakerNames(result.messages).length + ' 位发言人。' +
       (parseIssue ? parseIssue : id('range').open ? '记录较长，已选好第一段，可调整制作范围。' : '可在「角色与声音」中选声。'));
   } catch (e) {
@@ -220,7 +295,7 @@ function editedRange() {
     note(id('fileStatus'),'已取消导入，保留当前范围。');
   }
   cachedTranslation = null;
-  note(id('progress'),'');
+  resetJobProgress();
   scan();
 }
 for (const key of ['rangeFrom','rangeTo']) id(key).addEventListener('input',editedRange);
@@ -241,7 +316,7 @@ source.addEventListener('input', () => {
   cancelImport();
   cachedTranslation = null;
   note(id('fileStatus'),'');
-  note(id('progress'),'');
+  resetJobProgress();
   scan();
 });
 source.addEventListener('blur', () => {
@@ -256,12 +331,14 @@ function setBusy(value) {
   if (value) id('nextRange').disabled = id('prevRange').disabled = true;
   else scan();
   id('cancel').hidden = !value;
-  id('editor').setAttribute('aria-busy',String(value));
+  id('generate').setAttribute('aria-busy',String(value));
+  id('progress').classList.toggle('sr-only',value);
   for (const select of id('cast').querySelectorAll('select')) select.disabled = value || nativeMode() && !systemVoices.length;
 }
 function cancelJob() {
   if (!working) return;
   jobVersion++;
+  resetJobProgress();
   cancelLocalTranslation();
   releaseLocalVoice();
   setBusy(false);
@@ -270,7 +347,7 @@ function cancelJob() {
 id('cancel').onclick = cancelJob;
 
 async function makeLines(messages, tell) {
-  const lines = await translateLocally(messages, progress => tell(typeof progress === 'string' ? progress : progress.message));
+  const lines = await translateLocally(messages,tell);
   if (!lines.length || lines.some(line => !line.en?.trim())) throw Error('部分句子没有可朗读的英文，请检查原文。');
   // The translator preserves exact source spans and skips inference on English.
   return lines.map(line => han.test(line.zh) ? line : {...line,en:line.zh});
@@ -285,12 +362,13 @@ async function voiceLine(line, voice, tell) {
     arm();
   });
   try {
-    const audio = renderLocalVoice(line.en,voice,message => { arm(); tell(message); });
+    const audio = renderLocalVoice(line.en,voice,(message,detail) => { arm(); tell(detail || message); });
     return await Promise.race([audio,idle]);
   } finally { clearTimeout(timer); }
 }
 id('generate').onclick = async () => {
   if (working || readingFile) return;
+  resetJobProgress();
   scan();
   if (!parsed) {
     note(id('progress'),parseIssue || '请先粘贴一段聊天，或选择微信 ZIP。',true);
@@ -308,36 +386,50 @@ id('generate').onclick = async () => {
   }
   const token = ++jobVersion, input = parsed.messages, voices = new Map(choices()), original = source.value, selection = id('rangeFrom').value + '-' + id('rangeTo').value;
   const live = () => token === jobVersion;
-  const tell = message => { if (live() && message) note(id('progress'),message); };
   demoVersion++;
   setBusy(true);
-  tell('正在按发言顺序整理对话…');
+  showJob('prepare','prepare','准备制作','正在检查所选消息、角色与英语台词。');
   try {
-    const lines = cachedTranslation?.original === original && cachedTranslation.selection === selection ? cachedTranslation.lines : await makeLines(input,tell);
+    const reuse = cachedTranslation?.original === original && cachedTranslation.selection === selection;
+    if (reuse) {
+      const count = cachedTranslation.lines.length;
+      showJob('translate','cache','复用本次选区的译文','已完成的英文稿保存在本页。',{unit:'lines',loaded:count,total:count});
+    }
+    const lines = reuse ? cachedTranslation.lines : await makeLines(input, info => { if (live()) showTranslation(info); });
     if (!live()) return;
     cachedTranslation = {original,selection,lines};
     const people = speakerNames(input);
     const title = people.slice(0,2).join('、') + (people.length > 2 ? '等' : '') + '的对话';
     if (native) {
       openCard({title,lines,voices,native:true,demo:false});
-      tell('已准备 ' + lines.length + ' 段，点「播放」使用本地系统声音。');
+      finishJob('已准备 ' + lines.length + ' 段，点「播放」使用本地系统声音。');
       showPlayer();
       return;
     }
     const ready = [];
+    showModel('voice-model',{phase:'prepare',message:'正在启动本机语音组件，并检查所需的声音文件。'});
     for (const [i,line] of lines.entries()) {
-      const stage = '配音 ' + (i+1) + ' / ' + lines.length + ' · ' + line.speaker;
-      tell(stage);
-      const blob = await voiceLine(line,voices.get(line.speaker),detail => tell(stage + '　' + detail));
+      if (i) showSpeech(i,lines.length,line);
+      const blob = await voiceLine(line,voices.get(line.speaker),info => {
+        if (!live()) return;
+        const data = typeof info === 'string' ? {message:info} : info;
+        if (data.stage === 'load') showModel('voice-model',data);
+        else if (data.stage === 'synthesize') showSpeech(i,lines.length,line,data.message);
+        else if (/模型|组件/u.test(data.message || '')) showModel('voice-model',data);
+        else showSpeech(i,lines.length,line,data.message);
+      });
       if (!live()) return;
       if (!(blob instanceof Blob) || blob.size < 44) throw Error('录音内容不完整，请重试。');
       ready.push({...line,blob});
     }
     openCard({title,lines:ready,demo:false});
-    tell('已生成 ' + ready.length + ' 段英语。点「播放」开始听。');
+    finishJob('已生成 ' + ready.length + ' 段英语。点「播放」开始听。');
     showPlayer();
   } catch (error) {
-    if (live()) note(id('progress'),'生成未完成。' + (error.message || '请分段重试。') + (native ? '' : ' 可改选「轻量朗读」继续。'),true);
+    if (live()) {
+      resetJobProgress();
+      note(id('progress'),'生成未完成。' + (error.message || '请分段重试。') + (native ? '' : ' 可改选「轻量朗读」继续。'),true);
+    }
   } finally {
     if (live()) { releaseLocalVoice(); setBusy(false); }
   }

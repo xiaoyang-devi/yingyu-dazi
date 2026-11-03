@@ -56,9 +56,9 @@ export async function translateLocally(messages, onProgress = () => {}) {
   cards.forEach((card, i) => { if (/\p{Script=Han}/u.test(card.zh)) pending.push(i); else card.en = card.zh.trim() })
   if (!pending.length) return cards
   if (globalThis.isSecureContext === false || typeof Worker !== 'function' || typeof WebAssembly !== 'object') throw new Error('当前浏览器不支持本机翻译。请使用较新版本的 Safari 或 Chrome。')
-  onProgress({stage:'load', message:'首次将下载约 130 MB 的翻译模型和运行文件。聊天文字留在本机。'})
+  onProgress({stage:'load', phase:'prepare', message:'正在打开本机翻译组件…'})
   // Dispose of the inference process at the end, before the voice model needs memory.
-  const worker = new Worker(new URL('./mt-worker.js', import.meta.url), {type:'module',name:'local-translation'})
+  const worker = new Worker(new URL('./mt-worker.js?v=4', import.meta.url), {type:'module',name:'local-translation'})
   let timer, cancel
   try {
     await new Promise((resolve,reject) => {
