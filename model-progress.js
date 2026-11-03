@@ -6,11 +6,18 @@ export function modelFileProgress(sizes, label, emit) {
   const expected = Object.entries(sizes)
   const allBytes = expected.reduce((sum, [, size]) => sum + size, 0)
   let knownTotal = expected.every(([, size]) => Number.isSafeInteger(size) && size >= 0)
-  let last = -Infinity, reportedReady = false
+  let last = -Infinity, reportedReady = false, lastBytes
   const owns = file => Object.hasOwn(sizes, file)
   function prepare(message) { emit({stage:'load', phase:'prepare', message}) }
   return {
-    request(file) { if (owns(file)) fetched.add(file) },
+    request(file) {
+      if (!owns(file)) return
+      if (!fetched.size && !lastBytes) emit({stage:'load', phase:'connect', message:'正在连接本站，等待'+label+'模型的第一批数据…'})
+      fetched.add(file)
+    },
+    networkRetry(attempt) {
+      emit({...lastBytes, stage:'load', phase:'retry', cached:false, message:'下载连接暂时中断，正在第 '+attempt+' / 2 次重新连接本站…'})
+    },
     prepare,
     observe({status, file, loaded: bytes}) {
       if (reportedReady || !owns(file) || (status !== 'progress' && status !== 'done')) return
@@ -34,11 +41,12 @@ export function modelFileProgress(sizes, label, emit) {
       if (read > 0) {
         const cached = fetched.size === 0
         const detail = {stage:'load', phase:cached?'cache':'download', unit:'bytes', loaded:read, cachedBytes, cached,
-          message:cached ? '正在从本机缓存读取'+label+'模型文件' : '正在读取'+label+'模型文件'}
+          message:cached ? '正在从本机缓存读取'+label+'模型文件' : '正在读取本站的'+label+'模型文件'}
         if (knownTotal && Number.isSafeInteger(allBytes) && allBytes > 0) {
           detail.total = allBytes
           detail.percent = Math.floor(100 * read / allBytes)
         }
+        lastBytes = detail
         emit(detail)
       }
       if (!reportedReady && done.size === expected.length) {

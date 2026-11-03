@@ -1,7 +1,10 @@
-import {modelFileProgress} from './model-progress.js?v=5';
+import {modelFileProgress} from './model-progress.js?v=6';
+import {createBestEffortCache} from './best-effort-cache.js?v=6';
+import {fetchSiteAsset} from './site-asset.js?v=6';
 // Pinned browser bundle from the Kokoro authors. The phonemizer and tokenizer run here.
-const PACKAGE = "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js";
-const WASM = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1/dist/";
+const PACKAGE = new URL("./assets/voice-runtime/kokoro.web.js",import.meta.url).href;
+const WASM = new URL("./assets/voice-runtime/",import.meta.url).href;
+const modelRoot = new URL("./assets/voice-model/",import.meta.url).href;
 const MODEL = "onnx-community/Kokoro-82M-v1.0-ONNX";
 const REV = "1939ad2a8e416c0acfeecc08a694d14ef25f2231";
 const base = "https://huggingface.co/" + MODEL + "/resolve/";
@@ -30,14 +33,13 @@ if (typeof ReadableStream !== "undefined" && !ReadableStream.prototype[Symbol.as
   });
 }
 
-// The published v1.2.1 bundle constructs HF /main/ URLs internally. Bind its fetch
-// and cache namespace to the immutable revision without modifying other app workers.
+// Keep the library's existing cache keys, but fetch its pinned bytes from this site.
 const modelFiles = new Set([
   "config.json","tokenizer.json","tokenizer_config.json","special_tokens_map.json","onnx/model_quantized.onnx",
   ...Array.from(voiceFiles,voice => "voices/"+voice+".bin")
 ]);
-const runtimeFiles = new Set(["ort-wasm-simd-threaded.jsep", "ort-wasm-simd-threaded", "ort-wasm-simd", "ort-wasm"]
-  .flatMap(stem => [WASM+stem+".wasm", WASM+stem+".mjs"]));
+const runtimeSizes = {"ort-wasm-simd-threaded.jsep.mjs":44484,"ort-wasm-simd-threaded.jsep.wasm":21596019};
+let bypassCache = false;
 const coreSizes = {"config.json":44, "tokenizer_config.json":113, "tokenizer.json":3497, "onnx/model_quantized.onnx":92361116};
 let progress;
 const http = self.fetch.bind(self);
@@ -47,27 +49,38 @@ self.fetch = (input, options = {}) => {
   if (!["GET","HEAD"].includes(method) || options.body || input.body || url.search || url.hash) {
     throw new Error("配音组件只允许下载静态模型文件。");
   }
-  let target;
+  let modelFile;
   for (const alias of ["main", REV]) {
     const prefix = base + alias + "/";
     if (url.href.startsWith(prefix) && modelFiles.has(url.href.slice(prefix.length))) {
-      target = base + REV + "/" + url.href.slice(prefix.length);
+      modelFile = url.href.slice(prefix.length);
       break;
     }
   }
-  if (!target && runtimeFiles.has(url.href)) target = url.href;
-  if (!target) throw new Error("本机语音组件阻止了非模型请求。");
+  const runtimeFile = url.href.startsWith(WASM) ? url.href.slice(WASM.length) : "";
+  if (!modelFile && !Object.hasOwn(runtimeSizes,runtimeFile)) throw Error("无效的语音组件文件。");
   if (method === "GET") {
-    if (runtimeFiles.has(target)) progress.prepare("正在载入本机语音运行组件，浏览器未报告此步骤的进度…");
-    else progress.request(target.slice((base+REV+"/").length));
+    if (runtimeFile) progress.prepare("正在载入本站的语音运行组件…");
+    else progress.request(modelFile);
   }
-  // Send no request bodies, caller headers or cookies, including when input is a Request.
-  return http(target, {method,credentials:"omit",referrerPolicy:"no-referrer",signal:options.signal || input.signal});
+  const bytes = modelFile?.startsWith('voices/') ? 522240 : coreSizes[modelFile] || runtimeSizes[runtimeFile];
+  return fetchSiteAsset(modelFile ? modelRoot + modelFile : url.href, {
+    fetcher:http, bytes, method,
+    fresh:bypassCache, signal:options.signal || input.signal,
+    onRetry:attempt => progress.networkRetry(attempt)
+  });
 };
 try {
   const open = self.caches.open.bind(self.caches);
-  self.caches.open = name => open("yingyudazi-voice-"+REV+"-"+name);
-} catch { /* Private browsing may disable the Cache API. */ }
+  const adapters = new Map();
+  self.caches.open = async name => {
+    if (!adapters.has(name)) adapters.set(name,createBestEffortCache({
+      name:"yingyudazi-voice-"+REV+"-"+name, open, bypassReads:bypassCache,
+      onBypass:() => progress?.prepare("已跳过暂不可用的设备缓存，正在从本站读取配音文件…")
+    }));
+    return adapters.get(name);
+  };
+} catch { /* CacheStorage is optional. */ }
 
 let engine;
 let queue=Promise.resolve();
@@ -82,7 +95,7 @@ function load() {
       // This published Kokoro bundle exposes only wasmPaths. Its bundled ORT
       // selects one thread in a non-cross-origin-isolated worker (including standalone iOS).
       env.wasmPaths = WASM;
-      progress.prepare("正在检查本机缓存并准备语音模型…");
+      progress.prepare("正在准备本站的配音模型…");
       return KokoroTTS.from_pretrained(MODEL,{device:"wasm",dtype:"q8",progress_callback:progress.observe});
     })().catch(error=>{engine=undefined;throw error;});
   }
@@ -126,7 +139,8 @@ function wav(parts, rate) {
   return buf;
 }
 
-async function render({id,text,voice}) {
+async function render({id,text,voice,bypassCache:skipCache}) {
+  bypassCache = skipCache === true;
   notify=(status,detail)=>self.postMessage({id,status,detail});
   try{
     if(!voiceFiles.has(voice) || typeof text!=="string" || !text.trim() || text.length>12000)throw new Error("无效的语音或台词。");
@@ -145,7 +159,7 @@ async function render({id,text,voice}) {
   }catch(error){
     // Keep locally processed transcript content out of telemetry/errors.
     console.warn("本机配音失败",String(error?.name || "Error"));
-    self.postMessage({id,error:"本机配音未完成。请确认浏览器支持 WebAssembly SIMD，可访问 Hugging Face 和 jsDelivr，并有足够可用内存。"});
+    self.postMessage({id,error:"本机配音未完成。请确认网络可以下载本站文件，然后重试。"});
   }finally{notify=()=>{};}
 }
 self.onmessage=event=>{queue=queue.then(()=>render(event.data));};

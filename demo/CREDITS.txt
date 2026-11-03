@@ -1,6 +1,6 @@
 最后一块饼干去哪儿了？
 
-本试听含原创虚构台词和中文对照。六条英语录音使用 Kokoro 82M v1.0 在本地合成，分别由阿宁（af_heart）与小川（am_michael）朗读。本站仅随附生成的六个试听文件。
+本试听含原创虚构台词和中文对照。六条英语录音使用 Kokoro 82M v1.0 在本地合成，分别由阿宁（af_heart）与小川（am_michael）朗读。试听区包含六个生成的录音。生成新材料所需的模型和运行组件也由本站提供，来源和版本见 ../assets/manifest.json。
 
 模型 hexgrad/Kokoro-82M 由 Hexgrad 发布，许可证为 Apache License 2.0。英语声音和数据来源见原模型说明。其 Creative Commons Attribution 段列有 Koniwa tnc（CC BY 3.0）和 SIWIS（CC BY 4.0）等来源。
 https://huggingface.co/hexgrad/Kokoro-82M

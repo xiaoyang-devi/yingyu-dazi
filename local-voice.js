@@ -23,7 +23,7 @@ function getWorker() {
   if (!globalThis.isSecureContext || !globalThis.Worker || !globalThis.WebAssembly) {
     throw new Error("本机配音需要支持 WebAssembly 的新版浏览器，并通过 HTTPS 或本机地址打开。");
   }
-  const active = new Worker(new URL("./voice-worker.js?v=4",import.meta.url),{type:"module",name:"local-english-voice"});
+  const active = new Worker(new URL("./voice-worker.js?v=6",import.meta.url),{type:"module",name:"local-english-voice"});
   worker = active;
   active.addEventListener("message",({data})=>{
     if (worker !== active) return;
@@ -49,14 +49,14 @@ function getWorker() {
   return active;
 }
 
-export async function renderLocalVoice(text,voice,onProgress) {
+export async function renderLocalVoice(text,voice,onProgress,{bypassCache = false} = {}) {
   if (typeof text !== "string" || !text.trim()) throw new Error("这句缺少英文台词。");
   if (text.length > 12000) throw new Error("这句过长，请先拆成较短的台词。");
   if (!LOCAL_VOICES.includes(voice)) throw new Error("未识别的本机音色。");
   const engine = getWorker(), id = ++nextId;
   return new Promise((resolve,reject)=>{
     pending.set(id,{resolve,reject,onProgress});
-    try { engine.postMessage({id,text:text.trim(),voice}); }
+    try { engine.postMessage({id,text:text.trim(),voice,bypassCache}); }
     catch (error) { pending.delete(id); reject(error); }
   });
 }

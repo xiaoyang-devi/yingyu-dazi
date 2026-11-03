@@ -1,6 +1,6 @@
 import {parseText} from './intake.js?v=4';
-import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=5.2';
-import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=5.2';
+import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=6';
+import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=6';
 import {localEnglishVoices, createLocalReader} from './native-speech.js';
 
 const id = key => document.getElementById(key);
@@ -43,7 +43,7 @@ function watchVisibleWork() {
     if (!working || document.hidden || panel.hidden) return;
     const hint = navigator.onLine === false && ['translation-model','voice-model'].includes(panel.dataset.stage)
       ? '设备显示离线。首次使用需联网下载模型；恢复网络后，可继续等或重新尝试。'
-      : '这一步暂时没有新进度，网页仍在等待。可留在本页继续等；若一直不动，点「重新尝试」。';
+      : '这一步暂时没有新进度，网页仍在等待。可留在本页继续等；若一直不动，点「重新尝试」可跳过本机缓存。';
     id('waitHint').textContent = hint;
     id('jobWait').hidden = false;
   }, 45000);
@@ -107,7 +107,7 @@ function showJob(stage,phase,title,message,measure = {}) {
 function showModel(stage,info) {
   const model = stage === 'voice-model' ? '配音模型' : '翻译模型';
   const phase = info.cached ? 'cache' : info.phase || 'prepare';
-  const verb = phase === 'cache' ? '读取缓存中的' : phase === 'download' ? '下载或读取' : '准备';
+  const verb = phase === 'cache' ? '读取缓存中的' : phase === 'download' ? '下载或读取' : phase === 'connect' ? '正在连接本站 · ' : phase === 'retry' ? '正在重连 · ' : '准备';
   // Some older workers only return message strings. They cannot supply a measurable total.
   const message = String(info.message || '正在本机准备模型文件。').replace(/\s*[·•]?\s*\d+(?:\.\d+)?\s*%/g,'').trim();
   showJob(stage,phase,verb + model,message,info);
@@ -373,16 +373,17 @@ id('cancel').onclick = cancelJob;
 id('retryJob').onclick = () => {
   if (!working) return;
   cancelJob();
-  id('generate').click();
+  startGeneration(true);
 };
 
-async function makeLines(messages, tell) {
-  const lines = await translateLocally(messages,tell);
+async function makeLines(messages, tell, bypassCache) {
+  const lines = await translateLocally(messages,tell,{bypassCache});
   if (!lines.length || lines.some(line => !line.en?.trim())) throw Error('部分句子没有可朗读的英文，请检查原文。');
   // The translator preserves exact source spans and skips inference on English.
   return lines.map(line => han.test(line.zh) ? line : {...line,en:line.zh});
 }
-id('generate').onclick = async () => {
+id('generate').onclick = () => startGeneration(false);
+async function startGeneration(bypassCache) {
   if (working || readingFile) return;
   resetJobProgress();
   scan();
@@ -411,7 +412,7 @@ id('generate').onclick = async () => {
       const count = cachedTranslation.lines.length;
       showJob('translate','cache','复用本次选区的译文','已完成的英文稿保存在本页。',{unit:'lines',loaded:count,total:count});
     }
-    const lines = reuse ? cachedTranslation.lines : await makeLines(input, info => { if (live()) showTranslation(info); });
+    const lines = reuse ? cachedTranslation.lines : await makeLines(input, info => { if (live()) showTranslation(info); },bypassCache);
     if (!live()) return;
     cachedTranslation = {original,selection,lines};
     const people = speakerNames(input);
@@ -434,7 +435,7 @@ id('generate').onclick = async () => {
         else if (data.stage === 'synthesize') showSpeech(i,lines.length,line,data.message);
         else if (/模型|组件/u.test(data.message || '')) showModel('voice-model',data);
         else showSpeech(i,lines.length,line,data.message);
-      });
+      },{bypassCache});
       if (!live()) return;
       if (!(blob instanceof Blob) || blob.size < 44) throw Error('录音内容不完整，请重试。');
       ready.push({...line,blob});
@@ -454,7 +455,7 @@ id('generate').onclick = async () => {
   } finally {
     if (live()) { releaseLocalVoice(); setBusy(false); }
   }
-};
+}
 
 function demoAudio(path) {
   const relative = String(path).replace(/^\.?\//u,'');

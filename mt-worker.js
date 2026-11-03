@@ -1,12 +1,15 @@
-import {modelFileProgress} from './model-progress.js?v=5'
+import {modelFileProgress} from './model-progress.js?v=6'
+import {createBestEffortCache} from './best-effort-cache.js?v=6'
+import {fetchSiteAsset} from './site-asset.js?v=6'
 // The worker permits only static model assets, with no request body, query or transcript in the URL.
-const runtime = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/'
+const runtime = new URL('./assets/mt-runtime/',import.meta.url).href
+const modelRoot = new URL('./assets/mt-model/',import.meta.url).href
 const model = 'Xenova/opus-mt-zh-en', revision = '39d480d52a9ea3065a1f117adfe4dbc55de10e6f'
 const base = 'https://huggingface.co/' + model + '/resolve/' + revision + '/'
 const sizes = { 'config.json':1389, 'tokenizer_config.json':282, 'generation_config.json':293,
   'tokenizer.json':6381339, 'onnx/encoder_model_quantized.onnx':52899742, 'onnx/decoder_model_merged_quantized.onnx':60212804 }
-const files = new Set([...Object.keys(sizes).map(f=>base+f), runtime+'ort-wasm-simd.wasm',runtime+'ort-wasm.wasm',
-  runtime+'ort-wasm-simd-threaded.wasm',runtime+'ort-wasm-threaded.wasm'])
+const runtimeSizes = {'ort-wasm-simd.wasm':10014674,'ort-wasm.wasm':9223228}
+let bypassCache = false
 const progress = modelFileProgress(sizes, '翻译', detail => self.postMessage({type:'progress', ...detail}))
 let assetProblem = ''
 function invalidAsset() {
@@ -51,39 +54,36 @@ function sizedModelResponse(url, response, discardCached) {
   return sized
 }
 
-async function useModelCache(env) {
-  if (!env.useBrowserCache) return
-  // Older cached blobs may also lack a usable content-length. Keep the same cache
-  // and keys as v2.17.2, but normalize known, immutable responses on a cache hit.
+function useModelCache(env) {
   env.useBrowserCache = false
-  try {
-    const cache = await caches.open('transformers-cache')
-    env.customCache = {
-      async match(key) {
-        const hit = await cache.match(key)
-        const discard = () => cache.delete(key)
-        try { return sizedModelResponse(key,hit,discard) }
-        catch { await discard(); return undefined }
-      },
-      put(key,value) { return cache.put(key,value) }
-    }
-    env.useCustomCache = true
-  } catch { /* Private browsing can disable CacheStorage. Loading from the network still works. */ }
+  env.useCustomCache = true
+  env.customCache = createBestEffortCache({
+    name:'transformers-cache', bypassReads:bypassCache,
+    normalizeHit:sizedModelResponse,
+    onBypass:() => progress.prepare('已跳过暂不可用的设备缓存，正在从本站读取翻译文件…')
+  })
 }
 const realFetch = self.fetch.bind(self)
 self.fetch = async (input, options = {}) => {
   const url = typeof input === 'string' ? input : input.url || String(input)
   const method = (options.method || input.method || 'GET').toUpperCase()
-  if (!files.has(url) || !['GET','HEAD'].includes(method) || options.body || input.body) throw new Error('Unavailable static asset')
+  const modelFile = url.startsWith(base) ? url.slice(base.length) : ''
+  const runtimeFile = url.startsWith(runtime) ? url.slice(runtime.length) : ''
+  if ((!Object.hasOwn(sizes,modelFile) && !Object.hasOwn(runtimeSizes,runtimeFile)) ||
+      !['GET','HEAD'].includes(method) || options.body || input.body) throw Error('Unavailable static asset')
   if (method === 'GET') {
-    if (url.startsWith(base)) progress.request(url.slice(base.length))
-    else progress.prepare('正在载入本机翻译运行组件，浏览器未报告此步骤的进度…')
+    if (modelFile) progress.request(modelFile)
+    else progress.prepare('正在载入本站的翻译运行组件…')
   }
-  let response
-  try { response = await realFetch(url,{method,credentials:'omit',referrerPolicy:'no-referrer',signal:options.signal || input.signal}) }
-  catch (error) { assetProblem = 'network'; throw error }
-  if (!response.ok) assetProblem = 'network'
-  return method === 'GET' ? sizedModelResponse(url,response) : response
+  try {
+    const result = await fetchSiteAsset(modelFile ? modelRoot + modelFile : url, {
+      fetcher:realFetch, bytes:sizes[modelFile] || runtimeSizes[runtimeFile], method,
+      fresh:bypassCache, signal:options.signal || input.signal,
+      onRetry:attempt => progress.networkRetry(attempt)
+    })
+    if (!result.ok) assetProblem = 'network'
+    return result
+  } catch (error) { assetProblem = 'network'; throw error }
 }
 self.onmessage = async ({data}) => {
   let stage = 'library'
@@ -92,16 +92,17 @@ self.onmessage = async ({data}) => {
         data.texts.some(text => typeof text !== 'string' || !text.trim() || Array.from(text.trim()).length > 160)) {
       throw new Error('Invalid input')
     }
+    bypassCache = data.bypassCache === true
     progress.prepare('翻译进程已启动，正在载入翻译程序…')
-    const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js')
+    const { pipeline, env } = await import('./assets/mt-runtime/transformers.min.js')
     stage = 'load'
     env.allowLocalModels = false
     // Pin both model/WASM assets; let newer Safari work without SharedArrayBuffer or COOP/COEP.
     env.backends.onnx.wasm.numThreads = 1
     env.backends.onnx.wasm.proxy = false
     env.backends.onnx.wasm.wasmPaths = runtime
-    progress.prepare('正在检查本机缓存并准备翻译模型…')
-    await useModelCache(env)
+    progress.prepare(bypassCache ? '已跳过缓存，正在准备从本站下载翻译模型…' : '正在查看本机已保存的翻译模型…')
+    useModelCache(env)
     const translate = await pipeline('translation',model,{revision,quantized:true,progress_callback:progress.observe})
     stage = 'translate'
     for (const [index,text] of data.texts.entries()) {
@@ -124,9 +125,9 @@ self.onmessage = async ({data}) => {
   } catch (error) {
     let message
     if (stage === 'translate') message = '本机模型未能完成这句翻译。请缩短本次制作范围后重试。'
-    else if (stage === 'library') message = '翻译程序未能载入。请检查网络能否访问 jsDelivr，并用新版 Safari 重试。'
+    else if (stage === 'library') message = '本站的翻译程序未能载入。请确认这个网站可以打开，再点生成重试。'
     else if (assetProblem === 'incomplete') message = '翻译模型文件不完整。请检查网络后重试，损坏的缓存文件会单独重新下载。'
-    else if (assetProblem === 'network' || /network|fetch|load failed|connection/i.test(error?.message || '')) message = '翻译文件下载未完成。请确认网络能访问 Hugging Face 和 jsDelivr 后重试。'
+    else if (assetProblem === 'network' || /network|fetch|load failed|connection|download|Model server|Model byte range/i.test(error?.message || '')) message = '本站的翻译文件下载未完成。请切换网络后重试。'
     else message = '本机翻译引擎未能启动。请关闭占用内存的其他页面，在新版 Safari 中重试。'
     self.postMessage({type:'error',message})
   }

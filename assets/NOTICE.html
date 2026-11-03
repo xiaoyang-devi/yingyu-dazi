@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>模型、软件许可与源代码 · 英语搭子</title>
+<main><h1>模型、软件许可与源代码</h1>
+<p>本站按需提供浏览器使用的公开模型和软件。下载文件的原始地址、固定版本、大小和 SHA-256 见<a href="manifest.json">模型与运行文件清单</a>。下列源代码和许可同样可以免费下载。</p>
+<h2>中文翻译</h2>
+<p>中译英模型由赫尔辛基大学语言技术研究组（Helsinki-NLP / OPUS-MT）开发，按照 <a href="licenses/CC-BY-4.0.txt">CC BY 4.0</a> 授权。Xenova 将原模型转为适用于 Transformers.js 的 ONNX 格式，本站提供该版本的量化文件，保持发布时的字节。参考文献为 Jörg Tiedemann 和 Santhosh Thottingal，<cite>OPUS-MT — Building open translation services for the World</cite>（2020）。见<a href="licenses/Marian-base-MODEL-CARD.md">原模型说明</a>、<a href="licenses/Marian-ONNX-MODEL-CARD.md">转换说明</a>及<a href="https://creativecommons.org/licenses/by/4.0/">许可摘要</a>。</p>
+<h2>英语配音</h2>
+<p>Kokoro-82M v1.0 模型来自 hexgrad，ONNX 版本由 onnx-community 发布。语音权重、英文音色向量和 Kokoro.js 自身的代码按 <a href="licenses/APACHE-2.0.txt">Apache 2.0</a> 授权。见<a href="licenses/Kokoro-ONNX-MODEL-CARD.md">模型说明</a>和<a href="licenses/kokoro-source.tar.gz">Kokoro.js 的源码与构建脚本</a>。</p>
+<p>Kokoro 浏览器程序含有 <a href="licenses/phonemizer-source.tar.gz">phonemizer.js 1.2.1</a> 的英文语音转换代码，其封装采用 <a href="licenses/phonemizer-APACHE-2.0.txt">Apache 2.0</a>。其中使用的 eSpeak NG 引擎由 Jonathan Duddington 和 eSpeak NG 贡献者开发，按 <a href="licenses/eSpeak-COPYING.txt">GPL 第 3 版或以后版本</a>提供。可以下载<a href="licenses/espeak-source.tar.gz">eSpeak NG 的 C 源码、词典输入及构建脚本</a>，以及 <a href="licenses/Emscripten-LICENSE.txt">Emscripten 运行库许可</a>。eSpeak NG 部分文件亦附有 <a href="licenses/eSpeak-COPYING.APACHE.txt">Apache</a>、<a href="licenses/eSpeak-COPYING.BSD2.txt">BSD</a> 和 <a href="licenses/eSpeak-COPYING.UCD.txt">Unicode 数据</a>条款。上游编译版本的核对范围见下方构建记录。</p>
+<h2>浏览器推理运行库</h2>
+<p>Transformers.js 由 Hugging Face 及贡献者开发，采用 <a href="licenses/HUGGINGFACE-APACHE-2.0.txt">Apache 2.0</a>。可阅<a href="https://github.com/huggingface/transformers.js/tree/da2688626d7812ad1ea47fd304c2072cc685051b">v2 源码</a>并下载<a href="licenses/transformers-v3-source.tar.gz">v3 构建源码</a>。Hugging Face Jinja 遵守 MIT 条款（<a href="licenses/JINJA-v2-LICENSE.txt">翻译版本</a>、<a href="licenses/JINJA-v3-LICENSE.txt">配音版本</a>）。</p>
+<p>ONNX Runtime Web 由 Microsoft Corporation 及贡献者开发。翻译组件附有 <a href="licenses/ORT-v2-MIT.txt">MIT 许可</a>和<a href="licenses/ORT-v2-ThirdPartyNotices.txt">第三方声明</a>。配音组件附有 <a href="licenses/ORT-v3-MIT.txt">MIT 许可</a>和<a href="licenses/ORT-v3-ThirdPartyNotices.txt">第三方声明</a>。</p>
+<p><a href="licenses/BUILD.txt">维护者来源核对及构建记录</a> · <a href="licenses/sources.json">许可与源码文件的来源和校验值</a></p>
+</main></html>

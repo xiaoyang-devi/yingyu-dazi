@@ -1,0 +1,138 @@
+[
+  {
+    "path": "APACHE-2.0.txt",
+    "url": "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/LICENSE",
+    "bytes": 11357,
+    "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  },
+  {
+    "path": "HUGGINGFACE-APACHE-2.0.txt",
+    "url": "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/LICENSE",
+    "bytes": 11358,
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  {
+    "path": "CC-BY-4.0.txt",
+    "url": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/CC-BY-4.0.txt",
+    "bytes": 17023,
+    "sha256": "d557539df68e771cc1eedcc91d13f70fca930e508d11eedcafa4b15db49e3744"
+  },
+  {
+    "path": "JINJA-v2-LICENSE.txt",
+    "url": "https://cdn.jsdelivr.net/npm/@huggingface/jinja@0.2.2/LICENSE",
+    "bytes": 1069,
+    "sha256": "d6e7b19451c1b3d1d66353bb4b1274138953b3bfd9ae60c56e77b1f548796982"
+  },
+  {
+    "path": "JINJA-v3-LICENSE.txt",
+    "url": "https://cdn.jsdelivr.net/npm/@huggingface/jinja@0.4.1/LICENSE",
+    "bytes": 1069,
+    "sha256": "d6e7b19451c1b3d1d66353bb4b1274138953b3bfd9ae60c56e77b1f548796982"
+  },
+  {
+    "path": "ORT-v2-MIT.txt",
+    "url": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.14.0/LICENSE",
+    "bytes": 1073,
+    "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+  },
+  {
+    "path": "ORT-v3-MIT.txt",
+    "url": "https://raw.githubusercontent.com/microsoft/onnxruntime/89f8206ba4f1c22c39e0297fb55272e8ce8cd7d0/LICENSE",
+    "bytes": 1073,
+    "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+  },
+  {
+    "path": "ORT-v2-ThirdPartyNotices.txt",
+    "url": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.14.0/ThirdPartyNotices.txt",
+    "bytes": 299762,
+    "sha256": "cc63920441c5681cfb1663caf1de1858349b517fc1bed9ca669a85bc526cd13e"
+  },
+  {
+    "path": "ORT-v3-ThirdPartyNotices.txt",
+    "url": "https://raw.githubusercontent.com/microsoft/onnxruntime/89f8206ba4f1c22c39e0297fb55272e8ce8cd7d0/ThirdPartyNotices.txt",
+    "bytes": 326866,
+    "sha256": "e9e90971a8e75a9a8ac0c6412e29c1202d079998389915aa485f46c816c3b4cc"
+  },
+  {
+    "path": "phonemizer-APACHE-2.0.txt",
+    "url": "https://raw.githubusercontent.com/xenova/phonemizer.js/6835144b7ee9043129222549c1ed2f6a27216278/LICENSE",
+    "bytes": 11357,
+    "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  },
+  {
+    "path": "Emscripten-LICENSE.txt",
+    "url": "https://raw.githubusercontent.com/emscripten-core/emscripten/3.1.30/LICENSE",
+    "bytes": 5093,
+    "sha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86"
+  },
+  {
+    "path": "Marian-base-MODEL-CARD.md",
+    "url": "https://huggingface.co/Helsinki-NLP/opus-mt-zh-en/raw/cf109095479db38d6df799875e34039d4938aaa6/README.md",
+    "bytes": 3174,
+    "sha256": "7f4b7f90672cd55b85b213bbe21f4b2d0c92327e885734b7e86b019feb145a6b"
+  },
+  {
+    "path": "Marian-ONNX-MODEL-CARD.md",
+    "url": "https://huggingface.co/Xenova/opus-mt-zh-en/raw/39d480d52a9ea3065a1f117adfe4dbc55de10e6f/README.md",
+    "bytes": 571,
+    "sha256": "5ca823749ad58d6fae244198cf3c3c5a7f319793b6d8904af3029012a76cd589"
+  },
+  {
+    "path": "Kokoro-ONNX-MODEL-CARD.md",
+    "url": "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/raw/1939ad2a8e416c0acfeecc08a694d14ef25f2231/README.md",
+    "bytes": 10627,
+    "sha256": "b8fd888b4782f4d4ae85e2f1587cafd727037f4f138f72429ef1bd5908c0e9d8"
+  },
+  {
+    "path": "eSpeak-COPYING.txt",
+    "url": "https://raw.githubusercontent.com/espeak-ng/espeak-ng/0dfd1d77dd7f96ef1ea6856c9fa5cfac01599582/COPYING",
+    "bytes": 35147,
+    "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+  },
+  {
+    "path": "eSpeak-COPYING.APACHE.txt",
+    "url": "https://raw.githubusercontent.com/espeak-ng/espeak-ng/0dfd1d77dd7f96ef1ea6856c9fa5cfac01599582/COPYING.APACHE",
+    "bytes": 11358,
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  {
+    "path": "eSpeak-COPYING.BSD2.txt",
+    "url": "https://raw.githubusercontent.com/espeak-ng/espeak-ng/0dfd1d77dd7f96ef1ea6856c9fa5cfac01599582/COPYING.BSD2",
+    "bytes": 1244,
+    "sha256": "a8b0c1c7d7af6c0415c068be8cf373799d1a42b0707b79dc4ccfcaf593cd902d"
+  },
+  {
+    "path": "eSpeak-COPYING.UCD.txt",
+    "url": "https://raw.githubusercontent.com/espeak-ng/espeak-ng/0dfd1d77dd7f96ef1ea6856c9fa5cfac01599582/COPYING.UCD",
+    "bytes": 2788,
+    "sha256": "be029c50df83105a810e391778b6edcb522d6cb4b4e142332aca54437a499bf7"
+  },
+  {
+    "path": "espeak-source.tar.gz",
+    "url": "https://codeload.github.com/espeak-ng/espeak-ng/tar.gz/0dfd1d77dd7f96ef1ea6856c9fa5cfac01599582",
+    "bytes": 16341184,
+    "sha256": "e6b84b52a87b3ad72885331bd942b2adecd70c384fa4ecfbe10aae7d9afd5e21"
+  },
+  {
+    "path": "phonemizer-source.tar.gz",
+    "url": "https://codeload.github.com/xenova/phonemizer.js/tar.gz/6835144b7ee9043129222549c1ed2f6a27216278",
+    "bytes": 1173782,
+    "sha256": "d829721a393b68e3d904d0783a0551bc60b17b2903638350b5bf473657ff9275"
+  },
+  {
+    "path": "kokoro-source.tar.gz",
+    "url": "https://codeload.github.com/hexgrad/kokoro/tar.gz/664c76a704021239ba59c84dcbaa4d3dece01fe9",
+    "bytes": 40038,
+    "sha256": "b977a7105cc16e9e9ce22d44e8c717cecf2ab97103fe23aedd3fcec66c8fe77a",
+    "upstreamArchiveSha256": "7fb00d418195be678663f7844380abaf791aba4749137ed402d0da197bfa00cb",
+    "selection": "Source code, package lock, build configuration and included license. Excludes unrelated examples, media and test fixtures."
+  },
+  {
+    "path": "transformers-v3-source.tar.gz",
+    "url": "https://codeload.github.com/huggingface/transformers.js/tar.gz/746c8c25bf27c5e0684a20f76889b4bb8d23e295",
+    "bytes": 381489,
+    "sha256": "ecf3f6ee637c84381bf949b4918118caf5f817f4e7db2713331438bddf0bac60",
+    "upstreamArchiveSha256": "e7d03bc5ba461bdb3c578af13a24a5840cd3323e1e99b53630a111f18fbf6351",
+    "selection": "Source code, package lock, build configuration and included license. Excludes unrelated examples, media and test fixtures."
+  }
+]

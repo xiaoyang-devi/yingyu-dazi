@@ -40,7 +40,7 @@ function units(text) {
   return result
 }
 
-export async function translateLocally(messages, onProgress = () => {}) {
+export async function translateLocally(messages, onProgress = () => {}, {bypassCache = false} = {}) {
   cancelLocalTranslation()
   if (!Array.isArray(messages) || !messages.length) throw new Error('请先导入聊天文字。')
   const cards = []
@@ -58,7 +58,7 @@ export async function translateLocally(messages, onProgress = () => {}) {
   if (globalThis.isSecureContext === false || typeof Worker !== 'function' || typeof WebAssembly !== 'object') throw new Error('当前浏览器不支持本机翻译。请使用较新版本的 Safari 或 Chrome。')
   onProgress({stage:'load', phase:'prepare', message:'正在打开本机翻译组件…'})
   // Dispose of the inference process at the end, before the voice model needs memory.
-  const worker = new Worker(new URL('./mt-worker.js?v=5', import.meta.url), {type:'module',name:'local-translation'})
+  const worker = new Worker(new URL('./mt-worker.js?v=6', import.meta.url), {type:'module',name:'local-translation'})
   let cancel
   try {
     await new Promise((resolve,reject) => {
@@ -78,7 +78,7 @@ export async function translateLocally(messages, onProgress = () => {}) {
           if (finished === pending.length) resolve(); else reject(new Error('本机翻译尚未完成全部句子。'))
         } else if (data.type === 'error') reject(new Error(data.message))
       }
-      worker.postMessage({texts:pending.map(i=>cards[i].zh.trim())})
+      worker.postMessage({bypassCache,texts:pending.map(i=>cards[i].zh.trim())})
     })
     return cards
   } finally {
