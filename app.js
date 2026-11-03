@@ -1,4 +1,4 @@
-import {parseText} from './intake.js';
+import {parseText} from './intake.js?v=4';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=3';
 import {localEnglishVoices, createLocalReader} from './native-speech.js';
@@ -29,25 +29,29 @@ function note(node, message, error = false) {
   node.dataset.kind = error ? 'error' : 'info';
 }
 function buildRoles(names, force = false) {
-  if (!force && names.length === castNames.length && names.every((name, i) => name === castNames[i])) return;
-  castNames = names;
+  const people = corpus?.people || names;
   const selected = choices();
   const options = nativeMode() ? systemVoices.map(v => [v.key,v.name + ' · ' + v.lang])
     : LOCAL_VOICES.map(value => [value,voiceLabels[value] || value]);
   const available = options.map(([value]) => value);
-  for (const [name,voice] of selected) if (!names.includes(name) || !available.includes(voice)) selected.delete(name);
+  const present = new Set(people);
+  for (const [name,voice] of selected) if (!present.has(name) || !available.includes(voice)) selected.delete(name);
   const reserved = new Set(selected.values());
   const families = new Map(systemVoices.map(v => [v.key,v.family]));
   const familyOf = voice => families.get(voice) || voice;
   const usedFamilies = new Set([...reserved].map(familyOf));
-  const rows = names.map((name, i) => {
-    const voice = selected.get(name) || available.find(v => !usedFamilies.has(familyOf(v))) ||
-      available.find(v => !reserved.has(v)) || available[i % available.length];
-    if (voice) {
-      selected.set(name, voice);
-      reserved.add(voice);
-      usedFamilies.add(familyOf(voice));
-    }
+  // Assign from the entire source so changing batches never changes someone's voice.
+  for (const [i,name] of people.entries()) {
+    if (selected.has(name) || !available.length) continue;
+    const voice = available.find(v => !usedFamilies.has(familyOf(v))) || available.find(v => !reserved.has(v)) || available[i % available.length];
+    selected.set(name,voice);
+    reserved.add(voice);
+    usedFamilies.add(familyOf(voice));
+  }
+  if (!force && names.length === castNames.length && names.every((name,i) => name === castNames[i])) return;
+  castNames = names;
+  const rows = names.map(name => {
+    const voice = selected.get(name);
     const row = document.createElement('label'), label = document.createElement('span'), select = document.createElement('select');
     row.className = 'cast-row';
     label.textContent = name;
@@ -96,33 +100,146 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) refreshVoices();
   else if (reader.state !== 'idle') { reader.stop(); paintTransport(); }
 });
+const maxMessages = 60, maxCharacters = 6000;
+let scannedText, corpus, corpusError = '', prefix = [], importTicket = 0, readingFile = false;
+function suggestedEdge(anchor, direction) {
+  let edge = anchor;
+  while (Math.abs(edge-anchor)+1 < maxMessages) {
+    const next = edge + direction;
+    if (next < 1 || next > corpus.messages.length) break;
+    if (prefix[Math.max(anchor,next)] - prefix[Math.min(anchor,next)-1] > maxCharacters) break;
+    edge = next;
+  }
+  return edge;
+}
+function setRange(first,last) {
+  id('rangeFrom').value = first;
+  id('rangeTo').value = last;
+}
+function resetSource(raw, known) {
+  scannedText = raw;
+  corpus = null;
+  corpusError = '';
+  prefix = [0];
+  if (raw.trim()) {
+    try { corpus = known || parseText(raw); } catch (e) { corpusError = e.message; }
+  }
+  const total = corpus?.messages.length || 0;
+  id('range').hidden = total < 2;
+  if (corpus) {
+    for (const message of corpus.messages) prefix.push(prefix.at(-1) + [...message.text].length);
+    id('rangeFrom').max = id('rangeTo').max = total;
+    setRange(1,suggestedEdge(1,1));
+  }
+  id('range').open = total > maxMessages || prefix.at(-1) > maxCharacters;
+  if (corpus) corpus.people = speakerNames(corpus.messages);
+  id('materials').textContent = corpus
+    ? corpus.people.length + ' 位发言人 · ' + total + ' 条文字' + (corpus.skipped ? ' · 已跳过 ' + corpus.skipped + ' 条' : '')
+    : raw.trim() ? '请核对昵称、日期时间与正文的排版' : '支持中文、英文和中英混合聊天';
+}
+function excerpt(message) {
+  const start = message.text.slice(0,72).replace(/\s+/gu,' ');
+  return message.speaker + '「' + Array.from(start).slice(0,24).join('') + (start.length > 24 ? '…' : '') + '」';
+}
 function scan() {
-  const text = source.value, amount = [...text].length;
+  if (source.value !== scannedText) resetSource(source.value);
   parsed = null;
-  parseIssue = '';
-  id('characters').textContent = amount.toLocaleString('en-US') + ' / 6,000';
-  try {
-    if (amount > 6000) throw Error('一次最多 6,000 个字符，请选取一部分对话。');
-    if (text.trim()) {
-      const result = parseText(text);
-      if (result.messages.length > 60) throw Error('一次最多 60 条消息，请分成两次制作。');
-      parsed = result;
+  parseIssue = corpusError;
+  let amount = 0;
+  if (corpus) {
+    const first = Number(id('rangeFrom').value), last = Number(id('rangeTo').value), total = corpus.messages.length;
+    const valid = Number.isInteger(first) && Number.isInteger(last) && first >= 1 && first <= last && last <= total;
+    const count = last-first+1;
+    id('prevRange').disabled = working || !valid || first === 1;
+    id('nextRange').disabled = working || !valid || last === total;
+    id('rangeSummary').textContent = valid ? '第 ' + first + '–' + last + ' 条' : '共 ' + total + ' 条';
+    id('rangePreview').textContent = valid ? excerpt(corpus.messages[first-1]) + (first === last ? '' : ' → ' + excerpt(corpus.messages[last-1])) : '';
+    if (!valid) parseIssue = '请填写 1 到 ' + total + ' 之间的消息编号，结束编号应大于或等于起始编号。';
+    else {
+      amount = prefix[last]-prefix[first-1];
+      if (count > maxMessages || amount > maxCharacters) {
+        parseIssue = count === 1 ? '这一条正文超过 6,000 字。请在原文框中拆短，或选择其他消息。'
+          : '本次最多制作 60 条、6,000 个正文字。请缩短下面的消息范围。';
+      } else parsed = {messages:corpus.messages.slice(first-1,last),skipped:corpus.skipped};
     }
-  } catch (e) { parseIssue = e.message; }
+    note(id('rangeNote'),parseIssue || '仅制作选中的 ' + count + ' 条文字，原文框保留整份记录。每次最多 60 条、6,000 个正文字。',!!parseIssue);
+  }
+  id('characters').textContent = amount.toLocaleString('en-US') + ' / 6,000 正文字';
   const names = parsed ? speakerNames(parsed.messages) : [];
   buildRoles(names);
   id('roles').hidden = !names.length;
   id('peopleCount').textContent = names.length + ' 位';
-  id('materials').textContent = parsed
-    ? names.length + ' 位发言人 · ' + parsed.messages.length + ' 条文字' + (parsed.skipped ? ' · 已跳过 ' + parsed.skipped + ' 条' : '')
-    : text.trim() ? '请用「名字：内容」标明发言人' : '支持中文、英文和中英混合聊天';
   const count = nativeMode() ? systemVoices.length : LOCAL_VOICES.length;
   id('roleHint').textContent = !count ? '请先在设备上准备本地英语声音。' : names.length > count
     ? '可选 ' + count + ' 种声音，超过这个人数时会共用部分声音。' : '按发言顺序分配声音，可为每个人重新选择。';
 }
+function setReading(value) {
+  readingFile = value;
+  id('cancelFile').hidden = !value;
+  id('generate').disabled = working || value;
+}
+function cancelImport() {
+  importTicket++;
+  if (readingFile) setReading(false);
+}
+id('cancelFile').onclick = () => {
+  cancelImport();
+  note(id('fileStatus'),'已取消导入，原文和听力卡仍在。');
+};
+id('chatFile').onchange = async event => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file || working) return;
+  const ticket = ++importTicket;
+  setReading(true);
+  note(id('fileStatus'),'正在本机读取聊天文字…');
+  try {
+    const {readChatText} = await import('./chat-file.js');
+    if (ticket !== importTicket) return;
+    const raw = await readChatText(file);
+    if (ticket !== importTicket) return;
+    // Validate first so a damaged archive never replaces a usable draft.
+    const result = parseText(raw);
+    source.value = raw;
+    cachedTranslation = null;
+    resetSource(source.value,result);
+    scan();
+    note(id('progress'),'');
+    note(id('fileStatus'),'已导入 ' + result.messages.length + ' 条文字、' + speakerNames(result.messages).length + ' 位发言人。' +
+      (id('range').open ? '记录较长，已选好第一段，可调整制作范围。' : '可在「角色与声音」中选声。'));
+  } catch (e) {
+    if (ticket === importTicket) note(id('fileStatus'),'导入未完成。' + (e.message || '请重新选择 ZIP 或 TXT。'),true);
+  } finally {
+    if (ticket === importTicket) setReading(false);
+  }
+};
+function editedRange() {
+  if (readingFile) {
+    cancelImport();
+    note(id('fileStatus'),'已取消导入，保留当前范围。');
+  }
+  cachedTranslation = null;
+  note(id('progress'),'');
+  scan();
+}
+for (const key of ['rangeFrom','rangeTo']) id(key).addEventListener('input',editedRange);
+id('nextRange').onclick = () => {
+  const first = Number(id('rangeTo').value)+1;
+  if (!corpus || first > corpus.messages.length) return;
+  setRange(first,suggestedEdge(first,1));
+  editedRange();
+};
+id('prevRange').onclick = () => {
+  const last = Number(id('rangeFrom').value)-1;
+  if (!corpus || last < 1) return;
+  setRange(suggestedEdge(last,-1),last);
+  editedRange();
+};
 source.addEventListener('input', () => {
   if (working) cancelJob();
+  cancelImport();
   cachedTranslation = null;
+  note(id('fileStatus'),'');
   note(id('progress'),'');
   scan();
 });
@@ -133,7 +250,10 @@ source.addEventListener('blur', () => {
 function setBusy(value) {
   working = value;
   source.readOnly = value;
-  id('generate').disabled = id('engine').disabled = value;
+  id('generate').disabled = value || readingFile;
+  id('engine').disabled = id('chatFile').disabled = id('rangeFrom').disabled = id('rangeTo').disabled = value;
+  if (value) id('nextRange').disabled = id('prevRange').disabled = true;
+  else scan();
   id('cancel').hidden = !value;
   id('editor').setAttribute('aria-busy',String(value));
   for (const select of id('cast').querySelectorAll('select')) select.disabled = value || nativeMode() && !systemVoices.length;
@@ -169,9 +289,13 @@ async function voiceLine(line, voice, tell) {
   } finally { clearTimeout(timer); }
 }
 id('generate').onclick = async () => {
-  if (working) return;
+  if (working || readingFile) return;
   scan();
-  if (!parsed) { note(id('progress'),parseIssue || '请先粘贴一段带发言人名字的聊天。',true); source.focus(); return; }
+  if (!parsed) {
+    note(id('progress'),parseIssue || '请先粘贴一段聊天，或选择微信 ZIP。',true);
+    if (corpus && !id('range').hidden) { id('range').open = true; id('rangeFrom').focus(); } else source.focus();
+    return;
+  }
   const native = nativeMode();
   if (native) {
     refreshVoices();
@@ -181,16 +305,16 @@ id('generate').onclick = async () => {
     note(id('progress'),'本机生成需要通过 HTTPS 在新版 Safari 或 Chrome 中打开。',true);
     return;
   }
-  const token = ++jobVersion, input = parsed.messages, voices = new Map(choices()), original = source.value;
+  const token = ++jobVersion, input = parsed.messages, voices = new Map(choices()), original = source.value, selection = id('rangeFrom').value + '-' + id('rangeTo').value;
   const live = () => token === jobVersion;
   const tell = message => { if (live() && message) note(id('progress'),message); };
   demoVersion++;
   setBusy(true);
   tell('正在按发言顺序整理对话…');
   try {
-    const lines = cachedTranslation?.original === original ? cachedTranslation.lines : await makeLines(input,tell);
+    const lines = cachedTranslation?.original === original && cachedTranslation.selection === selection ? cachedTranslation.lines : await makeLines(input,tell);
     if (!live()) return;
-    cachedTranslation = {original,lines};
+    cachedTranslation = {original,selection,lines};
     const people = speakerNames(input);
     const title = people.slice(0,2).join('、') + (people.length > 2 ? '等' : '') + '的对话';
     if (native) {
@@ -411,6 +535,7 @@ id('saveCard').onclick = async () => {
   }
 };
 window.addEventListener('pagehide', event => {
+  cancelImport();
   cancelJob();
   reader.stop();
   playbackVersion++;
