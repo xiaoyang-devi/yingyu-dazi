@@ -1,11 +1,13 @@
 // Planning is local. Only translateOnline sends sentence bodies after the UI obtains consent.
 import {units} from './local-translate.js?v=8';
+import {translateBackupSegment} from './backup-translate.js?v=13';
 
 const endpoint = 'https://api.mymemory.translated.net/get';
 const needsTranslation = text => /\p{Script=Han}/u.test(text);
 const encoder = new TextEncoder();
-const maxBytes = 500, maxCharacters = 5000, maxLines = 200;
-const quotaMessage = '在线翻译达到免费用量或请求频率限制。可稍后再试，或选择本机翻译。';
+const maxBytes = 500, maxCharacters = 6000, maxLines = 200;
+const quotaMessage = 'MyMemory 的免费翻译用量已耗尽。可启用备用翻译后重试，或稍后再试。';
+const rateMessage = 'MyMemory 暂时限制了请求频率，请稍后重试。';
 const invalidResult = '服务未返回可确认的英文译文。';
 const cancelled = () => new DOMException('已取消在线翻译。','AbortError');
 
@@ -56,7 +58,7 @@ function prepare(messages) {
           if (needsTranslation(q) && !unique.has(q)) {
             unique.add(q);
             characters += Array.from(q).length;
-            if (characters > maxCharacters) throw Error('所选中文片段超过在线快读单次 5,000 字符的上限，请缩短选区。');
+            if (characters > maxCharacters) throw Error('所选中文片段超过在线快读单次 6,000 字符的上限，请缩短选区。');
           }
         }
       }
@@ -95,7 +97,6 @@ export function isReadableEnglish(text) {
 
 function english(data,source) {
   const status = Number(data?.responseStatus), primary = decodeText(data?.responseData?.translatedText);
-  if ([true,1,'1','true'].includes(data?.quotaFinished) || status === 429 || /^MYMEMORY WARNING/i.test(primary)) throw Error(quotaMessage);
   if ([400,413,422].includes(status)) return '';
   if (status !== 200) throw Error('在线翻译服务暂时无法返回英文。请稍后重试。');
   const matches = Array.isArray(data.matches) ? data.matches : [];
@@ -109,70 +110,122 @@ function english(data,source) {
   return candidates.find(isReadableEnglish) || '';
 }
 
-async function request(q,controller) {
+// A bare 429 is also used for short rate limits. Only a provider quota flag or a
+// specific daily-allowance warning authorizes routing a body to another service.
+class DailyQuotaError extends Error {
+  constructor(warning) {
+    super(quotaMessage);
+    const match = /NEXT AVAILABLE IN\s+(\d{1,2}) HOURS?\s+(\d{1,2}) MINUTES?\s+(\d{1,2}) SECONDS?/i.exec(warning);
+    const seconds = match && (+match[1] * 3600 + +match[2] * 60 + +match[3]);
+    // When no reset time is supplied, recheck on a later retry.
+    this.until = Date.now() + (seconds > 0 && seconds <= 86400 ? seconds : 300) * 1000;
+  }
+}
+
+async function request(q,signal) {
+  const controller = new AbortController();
+  const abort = () => controller.abort(cancelled());
+  if (signal.aborted) throw cancelled();
+  signal.addEventListener('abort',abort,{once:true});
   const timer = setTimeout(() => controller.abort(Error('在线翻译响应超时。可稍后重试，或选择本机翻译。')),20000);
   try {
     const response = await fetch(endpoint,{
       method:'POST',body:new URLSearchParams({q,langpair:'zh-CN|en-US'}),
       credentials:'omit',referrerPolicy:'no-referrer',cache:'no-store',redirect:'error',signal:controller.signal
     });
-    if (response.status === 429) throw Error(quotaMessage);
     if ([400,413,422].includes(response.status)) return '';
-    if (!response.ok) throw Error('在线翻译服务暂时不可用。可稍后重试，或选择本机翻译。');
+    if (!response.ok && response.status !== 429) throw Error('在线翻译服务暂时不可用。可稍后重试，或选择本机翻译。');
     let data;
-    try { data = await response.json(); } catch { throw Error('在线翻译服务返回的数据暂时无法读取。请稍后重试。'); }
+    try { data = await response.json(); }
+    catch { throw Error(response.status === 429 ? rateMessage : '在线翻译服务返回的数据暂时无法读取。请稍后重试。'); }
+    const limited = response.status === 429 || Number(data?.responseStatus) === 429;
+    const warning = /^MYMEMORY WARNING:\s*YOU USED ALL AVAILABLE FREE TRANSLATIONS(?: FOR TODAY)?(?:[.\s]|$)/i;
+    const details = decodeText(data?.responseDetails), translated = decodeText(data?.responseData?.translatedText);
+    if ([true,1,'1','true'].includes(data?.quotaFinished) || warning.test(details) || limited && warning.test(translated)) {
+      throw new DailyQuotaError(warning.test(details) ? details : translated);
+    }
+    if (limited) throw Error(rateMessage);
     return english(data,q);
   } catch (error) {
     if (controller.signal.aborted) throw controller.signal.reason || cancelled();
     if (error instanceof TypeError) throw Error('未能连接在线翻译服务。可检查网络后重试，或选择本机翻译。');
     throw error;
-  } finally { clearTimeout(timer); }
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort',abort);
+  }
 }
 
-export async function translateOnline(messages,onProgress = () => {},{signal,cache = new Map()} = {}) {
+// routeState belongs to a single selection. Reusing it requires fresh backup consent.
+export async function translateOnline(messages,onProgress = () => {},{signal,cache = new Map(),allowBackup = false,routeState = {}} = {}) {
   if (signal?.aborted) throw cancelled();
   const {lines,queries} = prepare(messages);
   const pending = queries.filter(q => !isReadableEnglish(cache.get(q)));
   const controller = new AbortController();
   const abort = () => controller.abort(cancelled());
   signal?.addEventListener('abort',abort,{once:true});
-  const invalid = new Set();
+  const failures = new Map();
   let next = 0, processed = queries.length - pending.length, stopReason = '';
-  function progress() {
-    const total = queries.length;
-    onProgress({stage:'translate',phase:'translate',unit:'lines',loaded:processed,total,
-      message:'已处理 ' + processed + ' / ' + total + ' 个不同片段。' + (invalid.size ? '其中 ' + invalid.size + ' 段需核对英文。' : '')});
+  let exhausted = allowBackup && routeState.primaryQuotaUntil > Date.now();
+  if (!exhausted && pending.length) delete routeState.primaryQuotaUntil;
+  function progress(provider) {
+    onProgress({stage:'translate',phase:'translate',provider,unit:'lines',loaded:processed,total:queries.length,
+      message:'已处理 ' + processed + ' / ' + queries.length + ' 个不同片段。' + (failures.size ? '其中 ' + failures.size + ' 段需核对或重试。' : '')});
+  }
+  function record(q,result,provider) {
+    if (isReadableEnglish(result)) cache.set(q,result);
+    else failures.set(q,invalidResult);
+    processed++;
+    progress(provider);
   }
   async function take() {
-    while (!controller.signal.aborted && next < pending.length) {
+    while (!controller.signal.aborted && !exhausted && !stopReason && next < pending.length) {
       const q = pending[next++];
-      let result;
-      try { result = await request(q,controller); }
-      catch (error) {
-        if (signal?.aborted) throw cancelled();
-        if (!stopReason) {
+      try {
+        const result = await request(q,controller.signal);
+        if (!controller.signal.aborted) record(q,result,'primary');
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof DailyQuotaError) {
+          exhausted = true;
+          routeState.primaryQuotaUntil = error.until;
+        } else {
           stopReason = error.message || '在线翻译暂时不可用。';
-          controller.abort();
+          failures.set(q,stopReason);
+          processed++;
+          progress('primary');
         }
-        return;
       }
-      if (controller.signal.aborted) return;
-      if (result) cache.set(q,result);
-      else invalid.add(q);
-      processed++;
-      progress();
     }
   }
   try {
-    if (queries.length) progress();
+    if (queries.length) progress(exhausted ? 'backup' : 'primary');
+    // Finish both outstanding lookups before forming the backup queue. A slow
+    // success (or an invalid translation) must never be submitted a second time.
     await Promise.all(Array.from({length:Math.min(2,pending.length)},take));
-    if (signal?.aborted) throw cancelled();
+    if (allowBackup && exhausted && !controller.signal.aborted) {
+      const remaining = pending.filter(q => !isReadableEnglish(cache.get(q)) && !failures.has(q));
+      if (remaining.length) progress('backup');
+      for (const q of remaining) {
+        if (controller.signal.aborted) break;
+        try {
+          const result = await translateBackupSegment(q,controller.signal);
+          if (!controller.signal.aborted) record(q,result,'backup');
+        } catch (error) {
+          stopReason = error.message || '备用翻译暂时不可用，请稍后重试。';
+          break;
+        }
+      }
+    } else if (exhausted) {
+      stopReason = quotaMessage;
+    }
+    if (controller.signal.aborted) throw cancelled();
     for (const line of lines) {
       if (line.en) continue;
       const q = line.zh.trim(), en = cache.get(q);
       if (isReadableEnglish(en)) line.en = en;
       else if (!needsTranslation(q)) line.failureReason = '未识别出可朗读的英文，可手动填写这句台词。';
-      else line.failureReason = invalid.has(q) ? invalidResult : stopReason || invalidResult;
+      else line.failureReason = failures.get(q) || stopReason || invalidResult;
     }
     return lines;
   } finally {

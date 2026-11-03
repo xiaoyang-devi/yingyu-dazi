@@ -1,7 +1,7 @@
 import {parseText} from './intake.js?v=4';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=8';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=7';
-import {planOnline, translateOnline, isReadableEnglish} from './online-translate.js?v=11';
+import {planOnline, translateOnline, isReadableEnglish} from './online-translate.js?v=13';
 import {cloudPanel} from './cloud-panel.js?v=12';
 import {CLOUD_VOICES,renderCloudDialogue} from './cloud-voice.js?v=12';
 import {createLocalReader} from './native-speech.js';
@@ -27,6 +27,14 @@ const choices = () => onlineMode() ? castChoices.online : castChoices.kokoro;
 let cachedTranslation = null;
 let onlinePlan = null, onlineIssue = '', onlineRequest = null;
 let onlineCache = new Map(), onlineClips = new Map(), onlineRoute = {}, reviewLines = null;
+let translationRoute = {};
+const translationBackup = id('allowTranslationBackup');
+const translationBackupKey = 'yingyu-dazi:opus-translation:v1';
+try { translationBackup.checked = localStorage.getItem(translationBackupKey) === 'yes'; } catch {}
+translationBackup.onchange = () => {
+  try { localStorage.setItem(translationBackupKey,translationBackup.checked ? 'yes' : 'no'); } catch {}
+  updateOnlinePlan();
+};
 const backupKey = 'yingyu-dazi:huggingface-backup:v1';
 let backupAllowed = false;
 try { backupAllowed = localStorage.getItem(backupKey) === 'yes'; } catch {}
@@ -68,6 +76,7 @@ function resetOnlineSelection() {
   onlineCache = new Map();
   onlineClips = new Map();
   onlineRoute = {};
+  translationRoute = {};
 }
 function previewOnline() {
   const list = id('sendLines');
@@ -88,12 +97,15 @@ function updateOnlinePlan() {
   const needed = Boolean(onlinePlan?.count);
   id('onlineTerms').hidden = !onlineMode() || !parsed;
   id('sendPreview').hidden = !needed;
+  id('translationBackupChoice').hidden = !needed;
+  id('translationBackupDetails').hidden = !translationBackup.checked;
   if (onlineMode()) {
     id('generate').setAttribute('aria-describedby','onlineScope onlineDisclosure');
     id('onlineScope').textContent = needed
-      ? '将发送 ' + onlinePlan.count + ' 段正文（' + onlinePlan.characters + ' 字符）给 MyMemory 翻译，再将英文交给 TTS.ai 配音。'
+      ? '待译 ' + onlinePlan.count + ' 段正文（' + onlinePlan.characters + ' 字符）。' +
+        (translationBackup.checked ? '优先用 MyMemory，额度用完时由 OPUS Translate 接译剩余正文。' : '由 MyMemory 翻译。') + '英文交给 TTS.ai 配音。'
       : '本次直接将需要配音的英文交给 TTS.ai。';
-    if (backupAllowed) id('onlineScope').textContent += '用量受限时可由 Hugging Face 接续。';
+    if (backupAllowed) id('onlineScope').textContent += '配音额度用完时可切换到备用声音。';
     id('quickIntro').textContent = onlineIssue || '自动翻译并按角色配音。默认交替使用 Heart 女声和 Michael 男声，可在下方调整。';
     id('generate').textContent = reviewLines && needed ? '同意重试待译句并生成自然配音' : '同意并生成自然配音';
   }
@@ -460,6 +472,7 @@ source.addEventListener('blur', () => {
 
 function setBusy(value) {
   working = value;
+  translationBackup.disabled = value;
   for (const container of backupControls) container.querySelector('input').disabled = value;
   id('demo').disabled = id('applyProof').disabled = value;
   id('cloudPanel').inert = id('proofPanel').inert = value;
@@ -582,6 +595,7 @@ async function startGeneration(bypassCache,useReady = false) {
   }
   const token = ++jobVersion, input = parsed.messages, voices = new Map(choices()), original = source.value, selection = id('rangeFrom').value + '-' + id('rangeTo').value;
   const allowBackup = online && backupAllowed;
+  const allowTranslationBackup = online && translationBackup.checked;
   const live = () => token === jobVersion;
   cloud.cancel();
   demoVersion++;
@@ -600,8 +614,8 @@ async function startGeneration(bypassCache,useReady = false) {
       lines = reviewedLines().filter(line => line.en);
     } else if (online) {
       lines = await translateOnline(input,info => {
-        if (live()) showJob('online','translate','MyMemory 在线翻译',info.message,info);
-      },{signal:onlineRequest.signal,cache:onlineCache});
+        if (live()) showJob('online','translate',info.provider === 'backup' ? '备用翻译 · OPUS Translate' : 'MyMemory 在线翻译',info.message,info);
+      },{signal:onlineRequest.signal,cache:onlineCache,allowBackup:allowTranslationBackup,routeState:translationRoute});
     } else {
       lines = reuse ? cachedTranslation.lines : await makeLines(input, info => { if (live()) showTranslation(info); },bypassCache);
     }

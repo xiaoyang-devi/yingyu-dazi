@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: https://api.mymemory.translated.net/get https://api.tts.ai/v1/ https://cdn.tts.ai https://kinabraytan-kokoro-tts-server.hf.space/gradio_api/; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: https://api.mymemory.translated.net/get https://api.tts.ai/v1/ https://cdn.tts.ai https://kinabraytan-kokoro-tts-server.hf.space/gradio_api/ https://helsinki-nlp-opus-translate.hf.space/call/translate https://helsinki-nlp-opus-translate.hf.space/call/translate/; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f5f3eb">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11,7 +11,7 @@
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./style.css?v=11">
-  <script type="module" src="./app.js?v=12"></script>
+  <script type="module" src="./app.js?v=13"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -51,11 +51,15 @@
       <div id="onlineTerms" class="online-terms" hidden>
         <strong id="onlineScope"></strong>
         <p id="onlineDisclosure">点击生成即同意本次发送。配音时会附上所选音色。昵称栏、时间栏和附件留在设备上，正文里提到的人名会随句发送。</p>
+        <div id="translationBackupChoice" hidden>
+          <label class="cloud-consent"><input id="allowTranslationBackup" type="checkbox" autocomplete="off" aria-describedby="translationBackupDetails">MyMemory 额度用完时，允许 OPUS Translate 接着翻译</label>
+          <p id="translationBackupDetails" class="small" hidden>只有仍需翻译的正文会发给 Hugging Face 上由 Helsinki-NLP 提供的<a href="https://huggingface.co/spaces/Helsinki-NLP/opus-translate" target="_blank" rel="noopener noreferrer">备用翻译服务</a>。服务未注明原句的保留时间，也有排队和用量限制。此选择记在当前浏览器，可随时在下次生成前关闭。</p>
+        </div>
         <div data-backup-control="allowBackup"></div>
         <details id="sendPreview"><summary>查看待翻译的原句</summary><ol id="sendLines"></ol></details>
         <details class="service-info"><summary>了解数据使用和免费额度</summary>
           <p>MyMemory 可能长期保存原句并交给翻译合作方处理。TTS.ai 暂存生成的录音，免费配音仅供个人非商业练习。</p>
-          <p>制作听力卡不会扣 ChatGPT 的使用额度。两家服务各有免费用量和频率限制。</p>
+          <p>制作听力卡不会扣 ChatGPT 的使用额度。在线翻译和配音分别有免费用量和请求频率限制。</p>
           <p><a href="https://mymemory.translated.net/terms-and-conditions" target="_blank" rel="noopener noreferrer">MyMemory 服务条款</a> · <a href="https://tts.ai/privacy/" target="_blank" rel="noopener noreferrer">TTS.ai 隐私政策</a> · <a href="https://tts.ai/terms/" target="_blank" rel="noopener noreferrer">TTS.ai 使用条款</a></p>
         </details>
       </div>

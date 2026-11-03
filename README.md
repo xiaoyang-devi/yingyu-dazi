@@ -6,9 +6,11 @@
 
 ## 在线制作与数据处理
 
-生成按钮旁会说明本次发送范围和两个服务的用途。每次点击只同意本次制作。浏览器逐段将选中的中文或中英混合正文发送给 MyMemory，将英文台词和音色发送给 TTS.ai。请求不另附昵称、时间或 ZIP 附件，正文中提到的个人信息会随句发送。MyMemory 可能长期保存提交的片段并交给翻译合作方处理。使用者可以先查看选中的原文，也可选择纯本机制作。[MyMemory 服务条款](https://mymemory.translated.net/terms-and-conditions)
+生成按钮旁会说明本次发送范围和各服务的用途。每次点击只同意本次制作。浏览器逐段将选中的中文或中英混合正文发送给 MyMemory，将英文台词和音色发送给 TTS.ai。请求不另附昵称、时间或 ZIP 附件，正文中提到的个人信息会随句发送。MyMemory 可能长期保存提交的片段并交给翻译合作方处理。使用者可以先查看选中的原文，也可选择纯本机制作。[MyMemory 服务条款](https://mymemory.translated.net/terms-and-conditions)
 
-匿名接口有每日额度，遇到限流会提示并保留原文。网站只调用翻译查询接口，不向译文库主动贡献聊天。[MyMemory 使用限制](https://mymemory.translated.net/doc/usagelimits.php)
+MyMemory 匿名查询每天限 5,000 字符。网站只调用翻译查询接口。[MyMemory 使用限制](https://mymemory.translated.net/doc/usagelimits.php)
+
+可以单独开启「MyMemory 额度用完时，允许 OPUS Translate 接着翻译」。此偏好记在当前浏览器。MyMemory 明确回报免费额度已用完时，网站会等待已发出的请求完成，再把仍需接译的正文逐段发给 Hugging Face 上由 Helsinki-NLP 提供的 OPUS Translate。服务在云端生成英文，未声明原句的保留时间，也可能排队或限流。普通网络故障会保留进度供重试。已译片段在同一页面、同一选区内可以复用。[备用翻译服务](https://huggingface.co/spaces/Helsinki-NLP/opus-translate)
 
 如果个别原句没有取得可用英文，页面会保留成功的译文。可手动补英文、只重试待译片段，或明确选择仅用已译句制作节选。使用「校对英文」可以按上下文修正台词。单独发出的问号默认读作 “Huh?”，其他纯符号或表情可以补写口语表达。
 
@@ -20,7 +22,7 @@ TTS.ai 暂存音频并记录 IP 等使用信息。免费生成的录音限个人
 
 网站直接调用 TTS.ai 的匿名免费接口。在线生成不占用 ChatGPT 或 OpenAI API 额度，TTS.ai 按公网 IP 限制每日字符数和请求频率。在同一张卡上重试会复用已收到的录音。录音齐全后可按句播放、存入练习库，或导出带字幕的离线文件，重听已保存的录音无需再次生成。[配音接口说明](https://tts.ai/api/)
 
-想在主服务配音额度不足时继续，可以在生成按钮上方开启备用配音。当前浏览器会记住这个选择，可随时关闭。已经生成的句子会保留。备用服务由 kinabraytan 维护，运行在 Hugging Face Spaces 上，使用 Bella 女声和 Michael 男声。它会收到需要新配音的英文和音色，生成可通过链接访问的临时录音。服务未注明音频保留时间，并可能需要排队。这项设置只用于配音，翻译仍由 MyMemory 提供。[备用服务说明](https://huggingface.co/spaces/kinabraytan/kokoro-tts-server/blob/main/README.md)
+想在主服务配音额度不足时继续，可以在生成按钮上方开启备用配音。当前浏览器会记住这个选择，可随时关闭。已经生成的句子会保留。备用服务由 kinabraytan 维护，运行在 Hugging Face Spaces 上，使用 Bella 女声和 Michael 男声。它会收到需要新配音的英文和音色，生成可通过链接访问的临时录音。服务未注明音频保留时间，并可能需要排队。备用配音和备用翻译分别授权。[备用服务说明](https://huggingface.co/spaces/kinabraytan/kokoro-tts-server/blob/main/README.md)
 
 ## 听和复习
 
