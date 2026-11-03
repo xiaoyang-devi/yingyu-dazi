@@ -1,0 +1,48 @@
+{
+  "title": "最后一块饼干去哪儿了？",
+  "lines": [
+    {
+      "speaker": "阿宁",
+      "zh": "欸，最后那块饼干是你吃的吗？",
+      "en": "Hey, did you eat the last cookie?",
+      "voice": "af_heart",
+      "audio": "./demo/01.mp3"
+    },
+    {
+      "speaker": "小川",
+      "zh": "对啊，我以为你是特意给我留的。",
+      "en": "Yeah. I thought you were saving it for me.",
+      "voice": "am_michael",
+      "audio": "./demo/02.mp3"
+    },
+    {
+      "speaker": "阿宁",
+      "zh": "我是留着呢。可不是给你留的。",
+      "en": "Oh, I was saving it. Just not for you.",
+      "voice": "af_heart",
+      "audio": "./demo/03.mp3"
+    },
+    {
+      "speaker": "小川",
+      "zh": "好吧，好吧。不过先别生气，看看烤箱里。",
+      "en": "Okay, fair. But before you get mad, check the oven.",
+      "voice": "am_michael",
+      "audio": "./demo/04.mp3"
+    },
+    {
+      "speaker": "阿宁",
+      "zh": "等等，你又烤了一整盘？",
+      "en": "Wait, you made a whole new batch?",
+      "voice": "af_heart",
+      "audio": "./demo/05.mp3"
+    },
+    {
+      "speaker": "小川",
+      "zh": "对。看到中间那块了吗？那块是你的。",
+      "en": "I did. And that one in the middle? That's yours.",
+      "voice": "am_michael",
+      "audio": "./demo/06.mp3"
+    }
+  ],
+  "credit": "原创虚构对话。阿宁使用 Kokoro Heart，小川使用 Kokoro Michael。"
+}

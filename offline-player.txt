@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; media-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>英语对话跟读</title>
+<style>
+:root{font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;color:#1d302e;background:#f4f5f1;--teal:#12655a;--muted:#536560;--line:#cfdbd4}
+*{box-sizing:border-box}body{padding:0;margin:0}button,input{font:inherit}button{color:inherit}
+.shell{max-width:55rem;height:100vh;height:100dvh;margin:auto;background:#fcfcf9;display:flex;flex-direction:column;overflow:hidden}
+.head{flex:0 0 auto;padding:clamp(12px,2vh,24px) clamp(13px,4vw,40px) 10px;border-bottom:1px solid var(--line);background:#fcfcf9;box-shadow:0 3px 12px #273d3008;z-index:1}
+.top{display:flex;gap:11px;align-items:center}.logo{align-self:center;display:flex;align-items:center;justify-content:center;gap:3px;width:41px;height:41px;flex:none;border-radius:13px;color:#fafdfb;background:#165b50}
+.logo i{display:block;background:currentColor;width:3px;border-radius:3px;height:11px}.logo i:nth-child(2){height:22px}.logo i:nth-child(3){height:16px}
+.eyebrow{margin:0 0 2px;font-size:.72rem;letter-spacing:.09em;font-weight:650;color:var(--teal)}h1{font-size:clamp(1.15rem,2.9vw,1.6rem);line-height:1.2;margin:0;font-weight:690;overflow-wrap:anywhere}
+.player{width:100%;height:42px;display:block;margin:10px 0 5px}.settings{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-height:33px}
+.meta{margin:0 auto 0 0;color:var(--muted);font-size:.78rem;font-variant-numeric:tabular-nums}
+.settings button,.settings label{display:inline-flex;align-items:center;gap:5px;min-height:34px;border-radius:.5rem;font-size:.82rem;color:#24443e;cursor:pointer}
+.settings button{background:transparent;padding:0 5px;border:0}.settings label{padding:0 3px}.settings input{accent-color:var(--teal);width:16px;height:16px;margin:0}
+.settings button:focus-visible,.settings label:focus-within,.bubble:focus-visible,.feed:focus-visible{outline:3px solid #287fca;outline-offset:2px}
+.feed{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scroll-padding:14px;text-align:left}
+.rows{list-style:none;margin:0 auto;padding:14px clamp(12px,4vw,38px) max(36px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
+.row{width:92%;max-width:42rem;align-self:flex-start}.row.other{align-self:flex-end}
+.bubble{display:block;width:100%;border:1px solid #cfdcd4;background:#f1f5ef;border-radius:4px 17px 17px;padding:10px 15px 12px;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.other .bubble{background:#f8f2ec;border-color:#e2d7cc;border-radius:17px 4px 17px 17px}
+.row .bubble[aria-current=true]{outline:2px solid var(--teal);outline-offset:0;background:#e7f4ee;box-shadow:0 4px 14px #174e3e16}
+.who{display:flex;align-items:baseline;gap:8px;color:#3d6155;font-size:.78rem;font-weight:650}.other .who{color:#775637}.pos{color:#51615a;font-size:.73rem;font-weight:450;font-variant-numeric:tabular-nums;margin-left:auto}
+.mark{display:none;color:#115e50;font-weight:700;font-size:.7rem}.bubble[aria-current=true] .mark{display:inline}
+.en,.zh{display:block;white-space:pre-wrap}.en{font-size:1.03rem;line-height:1.5;margin-top:4px;font-weight:540;color:#182d28}.zh{font-size:.89rem;line-height:1.5;margin-top:4px;color:#465650}
+.error{margin:3px 0;color:#923b2e;font-size:.85rem}.sr{position:absolute;clip:rect(0,0,0,0);width:1px;height:1px;overflow:hidden;white-space:nowrap}
+@media(min-width:58rem){.shell{border-left:1px solid #e0e5df;border-right:1px solid #e0e5df}}
+@media(max-width:460px){.head{padding-top:10px}.logo{width:34px;height:34px}.settings{gap:6px}.row{width:95%}.bubble{padding:8px 11px 10px}.rows{gap:9px}.player{margin-top:7px}.meta{font-size:.73rem}.settings button,.settings label{font-size:.77rem}}
+@media(max-height:430px){.head{padding-top:6px;padding-bottom:2px}.eyebrow,.logo{display:none}.player{height:32px;margin:3px 0}.settings{min-height:25px}.settings button,.settings label{min-height:25px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style></head>
+<body><main class="shell">
+<header class="head">
+<div class="top"><div class="logo" aria-hidden="true"><i></i><i></i><i></i></div><div><p class="eyebrow">英语听力 · 双语跟读</p><h1 id="title">英语对话跟读</h1></div></div>
+<audio id="audio" class="player" controls playsinline preload="metadata" aria-label="英语对话音频" src="data:audio/wav;base64,@@EMBEDDED_WAV@@"></audio>
+<div class="settings"><p class="meta" id="status">点播放或选择一句开始</p><button type="button" id="restart">↺ 从头播放</button><label><input type="checkbox" id="follow" checked>自动跟随</label></div>
+<p id="error" class="error" role="status" hidden></p>
+</header>
+<section aria-label="同步双语对话" aria-describedby="instructions" tabindex="0" id="feed" class="feed">
+<p id="instructions" class="sr">点击任一句可从该句播放。自动跟随会在切换发言时滚动，关闭后可自由浏览。</p><ol id="rows" class="rows"></ol>
+</section></main>
+<script id="cue-data" type="application/json">@@EMBEDDED_CUES@@</script>
+<script>
+"use strict";
+(() => {
+  const data=JSON.parse(document.getElementById("cue-data").textContent), cues=data.cues;
+  const byId=id=>document.getElementById(id), audio=byId("audio"), list=byId("rows"), feed=byId("feed");
+  const follow=byId("follow"), progress=byId("status"), error=byId("error");
+  const reduce=window.matchMedia("(prefers-reduced-motion: reduce)");
+  const people=new Map(), buttons=[];
+  const stamp=s=>Math.floor(s/60)+":"+String(Math.floor(s%60)).padStart(2,"0");
+  const span=(cls,text)=>{const el=document.createElement("span");el.className=cls;el.textContent=text;return el;};
+  byId("title").textContent=data.title; document.title=data.title;
+  const fragment=document.createDocumentFragment();
+  cues.forEach((cue,i)=>{
+    if(!people.has(cue.speaker)) people.set(cue.speaker,people.size);
+    const item=document.createElement("li");item.className=people.get(cue.speaker)%2?"row other":"row";
+    const bubble=document.createElement("button");bubble.type="button";bubble.className="bubble";bubble.dataset.index=i;
+    const who=span("who","");who.append(span("name",cue.speaker),span("mark","当前"),span("pos",stamp(cue.start)));
+    const en=span("en",cue.en);en.lang="en";const zh=span("zh",cue.zh);zh.lang="zh-CN";
+    bubble.append(who,en,zh);item.append(bubble);fragment.append(item);buttons.push(bubble);
+  });
+  list.append(fragment);
+  let active=-1, frame=0, pending=null, previousLabel="", seenPlayback=false;
+  function locate(t){
+    let lo=0,hi=cues.length;
+    while(lo<hi){const m=(lo+hi)>>>1;if(cues[m].start<=t)lo=m+1;else hi=m;}
+    const prior=lo-1;return {prior,live:prior>=0 && t<cues[prior].end?prior:-1};
+  }
+  function center(i,smooth){
+    if(i<0 || !follow.checked)return;
+    const a=buttons[i].getBoundingClientRect(),f=feed.getBoundingClientRect();
+    // A long utterance starts at its first line instead of hiding it above the viewport.
+    const delta=a.height>f.height-18 ? a.top-f.top-9 : a.top-f.top+(a.height-f.height)/2;
+    if(Math.abs(delta)>2)feed.scrollTo({top:feed.scrollTop+delta,behavior:smooth&&!reduce.matches?"smooth":"auto"});
+  }
+  function sync(force=false,smooth=false){
+    const cursor=locate(audio.currentTime||0), live=audio.ended?-1:cursor.live;
+    const changed=live!==active;
+    if(changed){
+      if(active>=0)buttons[active].removeAttribute("aria-current");
+      active=live;if(active>=0)buttons[active].setAttribute("aria-current","true");
+    }
+    if(changed||force)center(live,smooth);
+    let label;
+    if(audio.ended)label="播放完成 · 共 "+cues.length+" 段";
+    else if(live>=0)label=(audio.paused?"已暂停":"正在播放")+" · "+(live+1)+" / "+cues.length+" 段";
+    else if(!seenPlayback && audio.currentTime===0)label="点播放或选一句 · 共 "+cues.length+" 段";
+    else label=(audio.paused?"已暂停":"间奏停顿")+" · "+stamp(audio.currentTime||0)+" / "+stamp(data.duration);
+    if(previousLabel!==label){progress.textContent=label;previousLabel=label;}
+  }
+  function tick(){
+    sync(false,true);
+    if(!audio.paused&&!audio.ended&&!document.hidden)frame=requestAnimationFrame(tick);
+    else frame=0;
+  }
+  function restartClock(){
+    if(frame)cancelAnimationFrame(frame);
+    frame=0;sync(true,false);
+    if(!audio.paused&&!audio.ended&&!document.hidden)frame=requestAnimationFrame(tick);
+  }
+  function playAt(t){
+    pending=t;seenPlayback=true;
+    if(audio.readyState>=1){audio.currentTime=t;pending=null;}
+    const result=audio.play();
+    if(result)result.catch(()=>{error.textContent="未能开始播放。请点上方播放器的播放按钮。";error.hidden=false;sync();});
+    sync(true,false);
+  }
+  list.addEventListener("click",event=>{
+    const target=event.target.closest("button[data-index]");
+    if(target)playAt(cues[Number(target.dataset.index)].start);
+  });
+  byId("restart").addEventListener("click",()=>playAt(0));
+  follow.addEventListener("change",()=>{if(follow.checked)sync(true,false);});
+  audio.addEventListener("loadedmetadata",()=>{
+    if(pending!==null){audio.currentTime=pending;pending=null;}
+    sync(true,false);
+  });
+  audio.addEventListener("playing",()=>{seenPlayback=true;error.hidden=true;restartClock();});
+  ["play","pause","ended","seeking","seeked","ratechange"].forEach(e=>audio.addEventListener(e,restartClock));
+  audio.addEventListener("timeupdate",()=>sync(false,!audio.seeking&&!audio.paused));
+  audio.addEventListener("error",()=>{error.textContent="这款浏览器未能解码内嵌的 WAV。请用支持 WAV 的浏览器打开此文件。";error.hidden=false;});
+  document.addEventListener("visibilitychange",restartClock);
+  window.addEventListener("pageshow",restartClock);
+  window.addEventListener("resize",()=>sync(true,false));
+  sync();
+})();
+</script>
+</body></html>

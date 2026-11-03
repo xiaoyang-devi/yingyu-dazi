@@ -1,0 +1,18 @@
+最后一块饼干去哪儿了？
+
+本试听含原创虚构台词和中文对照。六条英语录音使用 Kokoro 82M v1.0 在本地合成，分别由阿宁（af_heart）与小川（am_michael）朗读。本站仅随附生成的六个试听文件。
+
+模型 hexgrad/Kokoro-82M 由 Hexgrad 发布，许可证为 Apache License 2.0。英语声音和数据来源见原模型说明。其 Creative Commons Attribution 段列有 Koniwa tnc（CC BY 3.0）和 SIWIS（CC BY 4.0）等来源。
+https://huggingface.co/hexgrad/Kokoro-82M
+https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
+https://huggingface.co/hexgrad/Kokoro-82M#creative-commons-attribution
+
+浏览器语音推理使用 kokoro-js 1.2.1（Apache License 2.0），及 onnx-community 的量化模型。
+https://github.com/hexgrad/kokoro/tree/main/kokoro.js
+https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/tree/1939ad2a8e416c0acfeecc08a694d14ef25f2231
+
+本机翻译用 Helsinki-NLP/opus-mt-zh-en，原模型许可证为 CC BY 4.0，Xenova 提供量化转换，Transformers.js 提供浏览器运行组件。模型在用户选择本机生成后才会下载。
+https://huggingface.co/Helsinki-NLP/opus-mt-zh-en
+https://creativecommons.org/licenses/by/4.0/
+https://huggingface.co/Xenova/opus-mt-zh-en/tree/39d480d52a9ea3065a1f117adfe4dbc55de10e6f
+https://github.com/huggingface/transformers.js

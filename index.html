@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; connect-src 'self' blob: https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f3eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="英语搭子">
+  <link rel="manifest" href="./app.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.js"></script>
+  <title>英语搭子 · 对话听力</title>
+</head>
+<body>
+  <header class="mast"><div class="shell mast-in">
+    <a class="brand" href="#workspace" aria-label="英语搭子，开始制作"><span class="mark" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M6 8h28v20H18l-8 6v-6H6z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/><path d="M12 17v4m5-8v12m5-10v8m5-6v4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></span>英语搭子</a>
+    <span class="mast-label"><i></i> 在本机制作</span>
+  </div></header>
+  <main class="shell" id="workspace">
+    <section class="intro" aria-labelledby="title">
+      <div><div class="kicker"><span></span>DIALOGUE STUDIO</div><h1 id="title">把聊天读成英语<span class="period">。</span></h1><p>粘贴聊天，给每个人选一种声音。戴上耳机，跟着中英字幕听一遍。</p></div>
+      <button class="demo-link" id="demo" type="button"><span class="demo-icon" aria-hidden="true">▷</span><span><small>SOUND CHECK</small><b>先听一段示例</b></span><span class="arrow" aria-hidden="true">↗</span></button>
+    </section>
+    <section class="work-card" id="editor" aria-labelledby="editor-title">
+      <div class="section-head"><div class="kicker">01 <span></span> SOURCE</div><h2 id="editor-title">聊天原文</h2></div>
+      <label class="field-label" for="source">每行一条。没有昵称时，可自行补上「甲」「乙」等称呼</label>
+      <textarea id="source" rows="5" spellcheck="false" placeholder="小夏：你带伞了吗？&#10;阿远：带了，一起走吧。"></textarea>
+      <div class="input-meta"><span id="materials">支持中文、英文和中英混合聊天</span><span id="characters">0 / 6,000</span></div>
+      <details id="roles" hidden><summary><span>角色与声音 <small id="peopleCount"></small></span><span class="adjust">调整</span></summary><div id="cast"></div><p class="small" id="roleHint">按发言顺序分配声音，可为每个人重新选择。</p></details>
+      <div class="generate-bar"><div class="download-note"><strong>首次生成约需下载 250 MB</strong><span>中文由 Marian 翻译，英语由 Kokoro 配音。已有英文会直接朗读。建议连接 Wi-Fi，生成时保持页面打开，练习时对照原文核对译意。</span></div><button id="generate" class="primary" type="button"><span aria-hidden="true">▷</span> 生成英语听力卡</button></div>
+      <div class="job-line"><p id="progress" aria-live="polite" role="status"></p><button id="cancel" type="button" class="plain" hidden>取消生成</button></div>
+    </section>
+    <section class="work-card player" id="player" aria-labelledby="cardTitle" hidden>
+      <div class="player-heading"><div class="section-head"><div class="kicker">02 <span></span> LISTEN</div><h2 id="cardTitle" tabindex="-1"></h2><p id="cardMeta" class="small"></p></div><button type="button" class="plain save" id="saveCard" hidden>保存跟读文件</button></div>
+      <p id="saveNote" role="status" class="small" hidden></p>
+      <div class="transport">
+        <button id="play" type="button" class="primary">▷ 播放</button>
+        <span id="position" class="counter">01 / 01</span>
+        <label class="speed">语速 <select id="rate" aria-label="语速"><option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.15">1.15×</option><option value="1.3">1.3×</option></select></label>
+        <div class="meter" id="meter" aria-hidden="true"><i></i></div>
+      </div>
+      <div class="reading-options"><label><input id="showChinese" type="checkbox" checked> 显示原文</label><label><input id="follow" type="checkbox" checked> 随播放滚动</label></div>
+      <p id="playerNote" role="status" class="small">点任意一句从这里听。</p>
+      <div id="lines" class="lines" aria-label="逐句对话"></div>
+    </section>
+    <footer><span>英语搭子 <b>／</b> <a href="./demo/CREDITS.txt">示例与模型来源</a></span><p>模型在设备上运行。聊天和生成的音频留在当前页面，想留存时可下载跟读文件。</p></footer>
+  </main>
+  <audio id="audio" preload="auto" playsinline></audio>
+</body></html>

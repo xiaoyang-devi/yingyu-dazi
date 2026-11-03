@@ -1,0 +1,24 @@
+{
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "name": "英语搭子 · 对话听力",
+  "short_name": "英语搭子",
+  "lang": "zh-CN",
+  "description": "把聊天做成按角色配音、带双语滚动字幕的英语听力卡。",
+  "display": "standalone",
+  "theme_color": "#f5f3eb",
+  "background_color": "#f5f3eb",
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ]
+}
