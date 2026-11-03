@@ -2,10 +2,11 @@ import {parseText} from './intake.js?v=4';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=8';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=7';
 import {planOnline, translateOnline} from './online-translate.js?v=8';
+import {cloudPanel} from './cloud-panel.js?v=9';
 import {localEnglishVoices, createLocalReader} from './native-speech.js';
 
-import {savePracticeCard, updatePracticePosition} from './library.js?v=7';
-import {practiceShelf} from './library-view.js?v=7';
+import {savePracticeCard, updatePracticePosition} from './library.js?v=9';
+import {practiceShelf} from './library-view.js?v=9';
 
 const id = key => document.getElementById(key);
 const source = id('source'), audio = id('audio');
@@ -51,8 +52,8 @@ function updateOnlinePlan() {
   if (!needed || (consentSignature && consentSignature !== JSON.stringify(onlinePlan.segments))) revokeConsent();
   if (needed) id('onlineScope').textContent = '本次将发送 ' + onlinePlan.count + ' 段中文或中英混合正文，共 ' + onlinePlan.characters + ' 字符';
   if (onlineMode()) id('quickIntro').textContent = onlineIssue || (onlinePlan && !needed
-    ? '这段聊天可直接用本机英语声音朗读，无需联网翻译。'
-    : '免下载网站模型。由 MyMemory 翻译所选中文，再用本机英语声音朗读。');
+    ? '纯英文可直接制卡。卡片里可选系统朗读，或选 Heart 女声和 Michael 男声在线配音。'
+    : '首次也无需下载模型。MyMemory 翻译后，可听系统朗读，或选 Heart 女声和 Michael 男声在线配音。');
   previewOnline();
 }
 id('sendPreview').ontoggle = previewOnline;
@@ -260,12 +261,13 @@ function refreshVoices(force = false) {
     const count = next.length;
     id('nativeSupport').textContent = count > 1 ? '这台设备有 ' + count + ' 种可用的本地英语声音，可在「角色与声音」中调整。'
       : count === 1 ? '只检测到 1 种本地英语声音，所有角色将共用。'
-      : '浏览器暂未提供本地英语声音。可先在设备的语音设置中安装英语声音，再回到此页，或选用 Kokoro。';
+      : onlineMode() ? '这台设备暂未提供本地英语声音。生成译文后，可直接选在线自然配音。' : '浏览器暂未提供本地英语声音。可先在设备的语音设置中安装英语声音，再回到此页，或选用 Kokoro。';
     force ||= changed;
   }
   if (force) buildRoles(parsed ? speakerNames(parsed.messages) : [],true);
 }
 function changeEngine() {
+  cloud.cancel();
   reader.stop();
   paintTransport();
   const native = nativeMode(), online = onlineMode();
@@ -515,7 +517,7 @@ async function startGeneration(bypassCache) {
   }
   if (native) {
     refreshVoices();
-    if (!systemVoices.length) { note(id('progress'),'这台设备暂时没有可用的本地英语声音。请安装英语声音后再试，或选用 Kokoro。',true); return; }
+    if (!online && !systemVoices.length) { note(id('progress'),'这台设备暂时没有可用的本地英语声音。请安装英语声音后再试，或选用 Kokoro。',true); return; }
   }
   if (!online && (!native || parsed.messages.some(m => han.test(m.text))) && (!globalThis.isSecureContext || !globalThis.Worker || !globalThis.WebAssembly)) {
     note(id('progress'),'本机生成需要通过 HTTPS 在新版 Safari 或 Chrome 中打开。',true);
@@ -523,6 +525,7 @@ async function startGeneration(bypassCache) {
   }
   const token = ++jobVersion, input = parsed.messages, voices = new Map(choices()), original = source.value, selection = id('rangeFrom').value + '-' + id('rangeTo').value;
   const live = () => token === jobVersion;
+  cloud.cancel();
   demoVersion++;
   jobKind = 'card';
   if (online) {
@@ -550,8 +553,8 @@ async function startGeneration(bypassCache) {
     const people = speakerNames(input);
     const title = people.slice(0,2).join('、') + (people.length > 2 ? '等' : '') + '的对话';
     if (native) {
-      openCard({title,lines,voices,native:true,demo:false});
-      finishJob('已准备 ' + lines.length + ' 段，点「播放」使用本地系统声音。');
+      openCard({title,lines,voices,native:true,online,demo:false});
+      finishJob(online ? '已准备 ' + lines.length + ' 段英文，可在卡片里选择「自然双人配音」。' : '已准备 ' + lines.length + ' 段，点「播放」使用本地系统声音。');
       showPlayer();
       return;
     }
@@ -615,6 +618,7 @@ function loadDemo() {
 loadDemo().catch(() => {}); // Small same-site demo metadata only. Models are loaded by Generate.
 id('demo').onclick = async () => {
   const token = ++demoVersion;
+  cloud.cancel();
   id('demo').disabled = true;
   try {
     const demo = demoCard || await loadDemo();
@@ -636,6 +640,13 @@ function clearAudio() {
   audio.load();
   if (card) for (const url of card.urls) if (url.startsWith('blob:')) URL.revokeObjectURL(url);
 }
+const cloud = cloudPanel((previous,lines) => {
+  if (card !== previous) return;
+  const title = id('practiceTitle').value.trim() || previous.title;
+  openCard({title,lines,cloud:true,resumeIndex:active});
+  note(id('playerNote'),'自然配音已就绪，点「播放」听对话。');
+  showPlayer();
+});
 function openCard(next) {
   clearAudio();
   cardVersion++;
@@ -644,20 +655,24 @@ function openCard(next) {
   endedAll = false;
   id('repeatLine').checked = false;
   card = {...next,urls:next.native ? [] : next.lines.map(line => line.blob ? URL.createObjectURL(line.blob) : line.audio)};
+  cloud.open(card);
+  const textOnly = next.native && !next.voices?.size;
+  if (textOnly && next.online) id('cloudPanel').open = true;
   id('cardTitle').textContent = next.title;
-  id('cardMeta').textContent = (next.native ? '本机系统声音 · ' : next.demo ? '双人试听 · ' : '本机生成 · ') + next.lines.length + ' 段对白';
+  id('cardMeta').textContent = (next.cloud ? 'Kokoro 在线配音 · ' : textOnly ? '英文已就绪 · ' : next.native ? '本机系统声音 · ' : next.demo ? 'Heart × Michael 双人试听 · ' : '已配音 · ') + next.lines.length + ' 段对白';
   id('player').hidden = false;
   id('cardActions').hidden = !!next.demo;
   id('practiceTitle').value = next.title;
   id('practiceTitle').readOnly = !!next.libraryId;
-  id('savePractice').disabled = !!next.libraryId;
+  id('savePractice').disabled = !!next.libraryId || textOnly;
   id('savePractice').textContent = next.libraryId ? '已存入我的练习' : '存入我的练习';
   note(id('librarySaveNote'),'');
   card.lastPosition = active;
   id('saveCard').hidden = !!(next.demo || next.native);
   id('saveCard').disabled = false;
   id('saveNote').hidden = true;
-  note(id('playerNote'),'点任意一句从这里听。');
+  note(id('playerNote'),textOnly ? '设备没有本地英语声音，生成自然配音后即可播放和保存。' : '点任意一句从这里听。');
+  id('play').disabled = !!textOnly;
   const nodes = next.lines.map((line,i) => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -719,6 +734,7 @@ async function playLine(index, restart, scroll) {
     endedAll = false;
     highlight(scroll);
     const line = card.lines[index];
+    if (!card.voices?.size) { note(id('playerNote'),'生成上方的自然配音后即可播放。');paintTransport();return; }
     note(id('playerNote'),'系统声音正在本机朗读，可点击任意一句跳听。');
     try {
       reader.start({text:line.en, key:card.voices.get(line.speaker), rate:Number(id('rate').value),
@@ -848,6 +864,7 @@ id('studioTab').onclick = id('returnStudio').onclick = () => {showStudio();windo
 document.querySelector('.brand').onclick = () => showStudio();
 id('libraryTab').onclick = () => {
   if (working) return;
+  cloud.cancel();
   demoVersion++;
   playbackVersion++;
   openingAudio = false;
@@ -862,6 +879,7 @@ id('libraryTab').onclick = () => {
 window.addEventListener('pagehide', event => {
   cancelImport();
   cancelJob();
+  cloud.cancel();
   reader.stop();
   playbackVersion++;
   openingAudio = false;

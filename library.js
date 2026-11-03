@@ -120,7 +120,7 @@ async function packed(card) {
       voices.push([name,key])
     }
   }
-  return {version:1,title:card.title,native,lines,voices,bytes}
+  return {version:1,title:card.title,native,online:native && card.online === true,cloud:!native && card.cloud === true,lines,voices,bytes}
 }
 
 async function writeRecord(record,header) {
@@ -200,7 +200,7 @@ export async function loadPracticeCard(id) {
     })
     const valid=await packed({...record,lines,voices})
     if (valid.bytes!==header.bytes) throw unavailable()
-    return {title:valid.title,native:valid.native,lines:valid.lines,voices:new Map(valid.voices),demo:false,libraryId:id,resumeIndex:header.position}
+    return {title:valid.title,native:valid.native,online:valid.online,cloud:valid.cloud,lines:valid.lines,voices:new Map(valid.voices),demo:false,libraryId:id,resumeIndex:header.position}
   } catch { throw unavailable() }
 }
 

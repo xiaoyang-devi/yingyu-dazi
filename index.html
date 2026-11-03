@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: https://api.mymemory.translated.net/get; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: https://api.mymemory.translated.net/get https://api.tts.ai/v1/ https://cdn.tts.ai; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f5f3eb">
   <meta name="mobile-web-app-capable" content="yes">
@@ -10,8 +10,8 @@
   <meta name="apple-mobile-web-app-title" content="英语搭子">
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="./style.css?v=8">
-  <script type="module" src="./app.js?v=8"></script>
+  <link rel="stylesheet" href="./style.css?v=9">
+  <script type="module" src="./app.js?v=9"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -22,8 +22,8 @@
   <main class="shell" id="workspace">
     <div id="studioView">
     <section class="intro" aria-labelledby="title">
-      <div><div class="kicker"><span></span> EVERYDAY ENGLISH</div><h1 id="title"><span>用自己的聊天</span><span>练听力<b class="period">。</b></span></h1><p>粘贴一段微信聊天，用手机里的声音听英语，看双语字幕。</p></div>
-      <button class="demo-link" id="demo" type="button"><svg class="tape" aria-hidden="true" viewBox="0 0 68 46" fill="none"><rect x="1" y="1" width="66" height="44" rx="6" fill="#304e40"/><rect x="6" y="6" width="56" height="26" rx="3" fill="#edf0bc"/><path d="M10 11h48m-48 3h48" stroke="#869176"/><rect x="14" y="18" width="40" height="9" rx="4.5" fill="#314e40"/><circle cx="20" cy="22.5" r="3" fill="#edb58d"/><circle cx="48" cy="22.5" r="3" fill="#edb58d"/><path d="m15 42 4-6h30l4 6" stroke="#c9cf9a"/></svg><span><small>试听带 01 · 双人对话</small><b>最后一块饼干去哪儿了？</b></span><span class="arrow" aria-hidden="true">▷</span></button>
+      <div><div class="kicker"><span></span> EVERYDAY ENGLISH</div><h1 id="title"><span>用自己的聊天</span><span>练听力<b class="period">。</b></span></h1><p>把微信聊天变成英语对话。听两个人接话，看字幕跟着声音走。</p></div>
+      <button class="demo-link" id="demo" type="button"><svg class="tape" aria-hidden="true" viewBox="0 0 68 46" fill="none"><rect x="1" y="1" width="66" height="44" rx="6" fill="#304e40"/><rect x="6" y="6" width="56" height="26" rx="3" fill="#edf0bc"/><path d="M10 11h48m-48 3h48" stroke="#869176"/><rect x="14" y="18" width="40" height="9" rx="4.5" fill="#314e40"/><circle cx="20" cy="22.5" r="3" fill="#edb58d"/><circle cx="48" cy="22.5" r="3" fill="#edb58d"/><path d="m15 42 4-6h30l4 6" stroke="#c9cf9a"/></svg><span><small>Heart 女声 × Michael 男声</small><b>试听：最后一块饼干去哪儿了？</b></span><span class="arrow" aria-hidden="true">▷</span></button>
     </section>
     <section class="work-card" id="editor" aria-labelledby="editor-title">
       <div class="section-head"><div class="kicker">01 <span></span> MAKE A CARD</div><h2 id="editor-title">导入聊天</h2></div>
@@ -38,7 +38,7 @@
         <p id="rangeNote" class="small" role="status"></p><p id="rangePreview" class="small"></p>
       </details>
       <p class="field-label"><label for="engine">制作方式 </label><select id="engine" autocomplete="off"><option value="online" selected>在线快读 · 免下载模型</option><option value="native">纯本机翻译 · 系统朗读</option><option value="kokoro">纯本机翻译 · Kokoro 配音</option></select></p>
-      <p id="quickIntro" class="small">中文可交给 MyMemory 翻译，英文直接用本机声音朗读。</p>
+      <p id="quickIntro" class="small">生成译文后，可直接朗读，也可选 Heart 女声和 Michael 男声在线配音。</p>
       <p id="nativeSupport" class="small" role="status" hidden></p>
       <details id="roles" hidden><summary><span>角色与声音 <small id="peopleCount"></small></span><span class="adjust">调整</span></summary><div id="cast"></div><p class="small" id="roleHint">按发言顺序分配声音，可为每个人重新选择。</p></details>
       <div id="onlineTerms" class="online-terms" hidden>
@@ -65,6 +65,18 @@
     </section>
     <section class="work-card player" id="player" aria-labelledby="cardTitle" hidden>
       <div class="player-heading"><div class="section-head"><div class="kicker">02 <span></span> LISTEN</div><h2 id="cardTitle" tabindex="-1"></h2><p id="cardMeta" class="small"></p></div></div>
+      <details id="cloudPanel" class="cloud-panel" hidden>
+        <summary><span><b>自然双人配音</b><small>Heart 女声 × Michael 男声</small></span><span class="adjust">选声音</span></summary>
+        <div class="cloud-body">
+          <p class="small">按出场顺序分配音色。可以给每个人单独选，也可以一键交换。</p>
+          <div id="cloudCast"></div><button id="cloudSwap" class="plain" type="button">交换男女声</button>
+          <details id="cloudPreview"><summary id="cloudScope">查看待发送的英文台词</summary><ol id="cloudLines"></ol></details>
+          <p class="small">TTS.ai 会收到英文台词和所选音色，并暂存生成的录音。昵称栏、时间和附件留在设备上。台词里提到的人名会随句发送。免费声音仅供个人非商业练习。<a href="https://tts.ai/privacy/" target="_blank" rel="noopener noreferrer">隐私政策</a> · <a href="https://tts.ai/terms/" target="_blank" rel="noopener noreferrer">使用条款</a></p>
+          <label class="cloud-consent"><input id="cloudConsent" type="checkbox" autocomplete="off">同意本次把上列英文交给 TTS.ai 配音</label>
+          <div class="cloud-buttons"><button type="button" id="cloudGenerate" class="primary" disabled>生成自然配音</button><button type="button" id="cloudCancel" class="plain" hidden>停止配音</button></div>
+          <p id="cloudStatus" class="small" role="status" aria-live="polite"></p>
+        </div>
+      </details>
       <div class="card-actions" id="cardActions" hidden><label>卡片名称<input type="text" id="practiceTitle" maxlength="100" autocomplete="off"></label><button type="button" class="plain" id="savePractice">存入我的练习</button><button type="button" class="plain save" id="saveCard" hidden>导出跟读文件</button></div>
       <p id="librarySaveNote" class="small" role="status"></p><p id="saveNote" role="status" class="small" hidden></p>
       <div class="transport">
@@ -82,7 +94,7 @@
       <div class="intro"><div><div class="kicker"><span></span> LISTEN AGAIN</div><h1 id="libraryTitle">我的练习<span class="period">。</span></h1><p>打开一张卡，从上次听到的那句继续。</p></div></div>
       <div class="work-card shelf"><div class="shelf-heading"><h2>已保存的听力卡</h2><span id="libraryCount" class="counter"></span></div><p class="small">保存在当前设备和浏览器。清理网站数据会移除卡片。</p><p id="libraryStatus" role="status" class="small"></p><div id="practiceList"></div><button type="button" id="returnStudio" class="plain">去制作听力卡</button></div>
     </section>
-    <footer><div class="footer-tools"><span>英语搭子 <b>／</b> <a href="./demo/CREDITS.txt">试听来源</a> · <a href="./assets/NOTICE.html">模型与许可</a></span><button type="button" id="shareSite" class="footer-link">分享网站</button><button type="button" id="installHelp" class="footer-link" aria-expanded="false" aria-controls="installTip">添加到 iPhone 主屏幕</button></div><p>在线快读经你同意后发送所选正文给 MyMemory。选择纯本机模式，翻译、配音和练习都留在设备上。</p><p id="installTip" hidden>在 iPhone 的 Safari 中打开本站，点分享菜单中的「添加到主屏幕」，再点「添加」。以后请从同一入口打开「我的练习」。</p><p id="shareStatus" role="status"></p></footer>
+    <footer><div class="footer-tools"><span>英语搭子 <b>／</b> <a href="./demo/CREDITS.txt">试听来源</a> · <a href="./assets/NOTICE.html">模型与许可</a></span><button type="button" id="shareSite" class="footer-link">分享网站</button><button type="button" id="installHelp" class="footer-link" aria-expanded="false" aria-controls="installTip">添加到 iPhone 主屏幕</button></div><p>在线翻译和在线配音分别征求同意。纯本机模式的翻译、配音和练习都留在设备上。</p><p id="installTip" hidden>在 iPhone 的 Safari 中打开本站，点分享菜单中的「添加到主屏幕」，再点「添加」。以后请从同一入口打开「我的练习」。</p><p id="shareStatus" role="status"></p></footer>
   </main>
   <audio id="audio" preload="auto" playsinline></audio>
 </body></html>
