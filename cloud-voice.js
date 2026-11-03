@@ -7,7 +7,7 @@ const maxPart = 500;
 const recentSubmissions = [];
 const maxAudioBytes = 12 * 1024 * 1024;
 const cancelled = () => new DOMException('已取消在线配音。', 'AbortError');
-const invalidAudio = () => Error('在线配音返回的录音不完整，请重试或改用设备声音。');
+const invalidAudio = () => Error('在线配音返回的录音不完整，请重试。');
 
 function splitLine(text) {
   const chars = Array.from(text.trim());
@@ -53,8 +53,8 @@ async function waitForSubmission(signal) {
 
 async function request(url, options, signal) {
   const res = await fetch(url, {...options, signal, credentials:'omit', referrerPolicy:'no-referrer', cache:'no-store', redirect:'error'});
-  if (res.status === 429 || res.status === 402) throw Error('在线配音达到免费用量或请求频率上限。可稍后重试，或改用设备声音。');
-  if (!res.ok) throw Error('在线配音服务暂时不可用。可稍后重试，或改用设备声音。');
+  if (res.status === 429 || res.status === 402) throw Error('在线配音达到免费用量或请求频率上限。可稍后重试，或在制作台选择纯本机配音。');
+  if (!res.ok) throw Error('在线配音服务暂时不可用。可稍后重试，或在制作台选择纯本机配音。');
   return res;
 }
 
@@ -92,7 +92,7 @@ function trimQuietEdges(view, blob) {
       if (variance > 24 ** 2) audible = true;
     }
   }
-  if (!audible) throw Error('在线配音返回了一段静音，请重试或改用设备声音。');
+  if (!audible) throw Error('在线配音返回了一段静音，请重试。');
   const from = Math.max(0, first - 1680), to = Math.min(frames, last + 3120); // 70 / 130 ms at 24 kHz
   if (from === 0 && to === frames) return blob.slice(0, blob.size, 'audio/wav');
   return waveFromParts(view.buffer.slice(0,44), [blob.slice(44 + from * 2, 44 + to * 2)]);
@@ -133,7 +133,7 @@ async function generatePart(text, voice, signal) {
       return readWave(await request(source.href, {}, signal));
     }
     if (!['queued','pending','processing','running','started','in_progress'].includes(result?.status)) {
-      throw Error('在线配音未能完成这句英文。可稍后重试，或改用设备声音。');
+      throw Error('在线配音未能完成这句英文。可稍后重试，或在制作台选择纯本机配音。');
     }
   }
 }
@@ -150,7 +150,7 @@ export async function synthesizeCloudLine(text, voice, signal) {
   try {
     for (const part of parts) {
       await waitForSubmission(controller.signal);
-      const timer = setTimeout(() => controller.abort(Error('在线配音响应超时。请检查网络后重试，或改用设备声音。')), 60000);
+      const timer = setTimeout(() => controller.abort(Error('在线配音响应超时。请检查网络后重试，或在制作台选择纯本机配音。')), 60000);
       try { clips.push(await generatePart(part, voice, controller.signal)); }
       finally { clearTimeout(timer); }
     }
@@ -162,9 +162,40 @@ export async function synthesizeCloudLine(text, voice, signal) {
     return waveFromParts(header, pcm);
   } catch (error) {
     if (controller.signal.aborted) throw controller.signal.reason || cancelled();
-    if (error instanceof TypeError) throw Error('未能连接在线配音服务，请检查网络或改用设备声音。');
+    if (error instanceof TypeError) throw Error('未能连接在线配音服务，请检查网络或选择纯本机配音。');
     throw error;
   } finally {
     signal?.removeEventListener('abort', abort);
   }
+}
+
+export const cloudClipKey = (voice,text) => JSON.stringify([voice,text]);
+
+// Only call after the user approves this selection. Cache by exact text AND voice
+// so retries, repeated sentences and edits reuse matching audio.
+export async function renderCloudDialogue(lines,voices,clips,signal,onLine) {
+  const pending = new Set();
+  let characters = 0;
+  for (const line of lines) {
+    const voice = voices.get(line.speaker);
+    if (!CLOUD_VOICES.includes(voice)) throw Error('请选择有效的自然配音音色。');
+    const key = cloudClipKey(voice,line.en);
+    if (clips.has(key) || pending.has(key)) continue;
+    pending.add(key);
+    characters += Array.from(line.en).length;
+  }
+  if (characters > 5000) throw Error('本次待配音的英文超过 5,000 字符，请缩短选区。');
+  const ready = [];
+  for (const [i,line] of lines.entries()) {
+    if (signal.aborted) throw signal.reason || cancelled();
+    const voice = voices.get(line.speaker), key = cloudClipKey(voice,line.en);
+    onLine(i,line,voice);
+    if (!clips.has(key)) {
+      const blob = await synthesizeCloudLine(line.en,voice,signal);
+      if (signal.aborted) throw signal.reason || cancelled();
+      clips.set(key,blob);
+    }
+    ready.push({...line,blob:clips.get(key)});
+  }
+  return ready;
 }

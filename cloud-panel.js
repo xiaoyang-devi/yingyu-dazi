@@ -1,5 +1,5 @@
 // Rendering the choices or the transcript never contacts the speech service.
-import {CLOUD_VOICES,synthesizeCloudLine} from './cloud-voice.js?v=9';
+import {CLOUD_VOICES,cloudClipKey,renderCloudDialogue} from './cloud-voice.js?v=11';
 
 export function cloudPanel(onReady) {
   const el = key => document.getElementById(key);
@@ -7,7 +7,7 @@ export function cloudPanel(onReady) {
   const labels = {af_heart:'Heart · 女声',am_michael:'Michael · 男声'};
   let card, request, cast = new Map(), clips = new Map();
 
-  function key(line) { return JSON.stringify([cast.get(line.speaker),line.en]); }
+  function key(line) { return cloudClipKey(cast.get(line.speaker),line.en); }
   function note(message, error = false) {
     el('cloudStatus').textContent = message;
     el('cloudStatus').dataset.kind = error ? 'error' : 'info';
@@ -69,22 +69,26 @@ export function cloudPanel(onReady) {
   function open(next,keepVoices = false) {
     cancel();
     const previousCast = keepVoices ? cast : null;
-    card = next?.native && next.online ? next : null;
+    card = next?.native && next.online || next?.cloud && next.voices?.size ? next : null;
     cast = new Map();
     if (keepVoices && card) {
       const lines = new Set(card.lines.map(line => line.en));
       for (const k of clips.keys()) if (!lines.has(JSON.parse(k)[1])) clips.delete(k);
     } else clips = new Map();
     note('');
-    panel.hidden = !card;
+    panel.hidden = !card?.native;
     panel.open = false;
     el('cloudCast').replaceChildren();
     el('cloudLines').replaceChildren();
     el('cloudPreview').open = consent.checked = false;
     if (!card) return;
     for (const name of new Set(card.lines.map(line => line.speaker))) {
-      const chosen = previousCast?.get(name);
+      const chosen = card.cloud ? card.voices.get(name) : previousCast?.get(name);
       cast.set(name,CLOUD_VOICES.includes(chosen) ? chosen : CLOUD_VOICES[cast.size % CLOUD_VOICES.length]);
+    }
+    if (card.cloud) {
+      for (const line of card.lines) clips.set(key(line),line.blob);
+      return;
     }
     el('cloudSwap').hidden = cast.size < 2;
     drawCast();
@@ -97,32 +101,31 @@ export function cloudPanel(onReady) {
   };
   consent.onchange = controls;
   el('cloudCancel').onclick = cancel;
-  generate.onclick = async () => {
-    if (!card || request || !consent.checked || consent.disabled || panel.hidden) return;
-    const current = card, job = new AbortController();
+  async function render(lines,onLine) {
+    if (!card || request) throw Error('已有配音任务正在进行。');
+    const job = new AbortController();
     request = job;
-    consent.checked = false;
     controls();
     try {
-      const lines = [];
-      for (const [i,line] of current.lines.entries()) {
-        const k = key(line);
-        note('正在配第 ' + (i+1) + ' / ' + current.lines.length + ' 句 · ' + labels[cast.get(line.speaker)] + '。长对话可能需要等候服务额度。');
-        if (!clips.has(k)) {
-          const clip = await synthesizeCloudLine(line.en,cast.get(line.speaker),job.signal);
-          if (request !== job) return;
-          clips.set(k,clip);
-        }
-        lines.push({...line,blob:clips.get(k)});
-      }
-      request = null;
-      onReady(current,lines);
+      return await renderCloudDialogue(lines,cast,clips,job.signal,onLine);
+    } finally {
+      if (request === job) { request = null; controls(); }
+    }
+  }
+  generate.onclick = async () => {
+    if (!card || request || !consent.checked || consent.disabled || panel.hidden) return;
+    const current = card;
+    consent.checked = false;
+    try {
+      const lines = await render(current.lines,(i,line,voice) => {
+        note('正在配第 ' + (i+1) + ' / ' + current.lines.length + ' 句 · ' + labels[voice] + '。');
+      });
+      if (card === current) onReady(current,lines,new Map(cast));
     } catch (error) {
-      if (request !== job) return;
-      request = null;
+      if (card !== current || error.name === 'AbortError') return;
       review();
       note((error.message || '在线配音未完成。') + ' 译文仍在，已收到的录音可在本页重用。',true);
     }
   };
-  return {open,cancel};
+  return {open,cancel,render};
 }

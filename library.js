@@ -112,7 +112,8 @@ async function packed(card) {
     lines.push(item)
   }
   const voices=[]
-  if (native) {
+  // Earlier cloud recordings have no saved voice identities. They remain playable.
+  if (native || card.cloud && card.voices?.size) {
     if (!(card.voices instanceof Map)) throw unavailable()
     for (const name of names) {
       const key=card.voices.get(name)

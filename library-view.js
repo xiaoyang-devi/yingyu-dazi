@@ -1,4 +1,4 @@
-import {listPracticeCards, loadPracticeCard, deletePracticeCard} from './library.js?v=9';
+import {listPracticeCards, loadPracticeCard, deletePracticeCard} from './library.js?v=11';
 
 const id = key => document.getElementById(key);
 function node(tag,text,cls) {

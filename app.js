@@ -1,12 +1,13 @@
 import {parseText} from './intake.js?v=4';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=8';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=7';
-import {planOnline, translateOnline, isReadableEnglish} from './online-translate.js?v=10.1';
-import {cloudPanel} from './cloud-panel.js?v=10';
-import {localEnglishVoices, createLocalReader} from './native-speech.js';
+import {planOnline, translateOnline, isReadableEnglish} from './online-translate.js?v=11';
+import {cloudPanel} from './cloud-panel.js?v=11';
+import {CLOUD_VOICES,renderCloudDialogue} from './cloud-voice.js?v=11';
+import {createLocalReader} from './native-speech.js';
 
-import {savePracticeCard, updatePracticePosition} from './library.js?v=9';
-import {practiceShelf} from './library-view.js?v=9';
+import {savePracticeCard, updatePracticePosition} from './library.js?v=11';
+import {practiceShelf} from './library-view.js?v=11';
 
 const id = key => document.getElementById(key);
 const source = id('source'), audio = id('audio');
@@ -21,13 +22,11 @@ const pad = n => String(n).padStart(2,'0');
 const han = /\p{Script=Han}/u;
 const reader = createLocalReader();
 const onlineMode = () => id('engine').value === 'online';
-const nativeMode = () => id('engine').value !== 'kokoro';
-const castChoices = {kokoro:new Map(),native:new Map()};
-const choices = () => nativeMode() ? castChoices.native : castChoices.kokoro;
-const kokoroNote = id('downloadNote').textContent;
-let systemVoices = [], cachedTranslation = null;
-let onlinePlan = null, onlineIssue = '', onlineRequest = null, consentSignature = '';
-let onlineCache = new Map(), reviewLines = null;
+const castChoices = {kokoro:new Map(),online:new Map()};
+const choices = () => onlineMode() ? castChoices.online : castChoices.kokoro;
+let cachedTranslation = null;
+let onlinePlan = null, onlineIssue = '', onlineRequest = null;
+let onlineCache = new Map(), onlineClips = new Map(), reviewLines = null;
 function clearReview() {
   reviewLines = null;
   id('translationReview').hidden = true;
@@ -36,11 +35,7 @@ function clearReview() {
 function resetOnlineSelection() {
   clearReview();
   onlineCache = new Map();
-  revokeConsent();
-}
-function revokeConsent() {
-  id('onlineConsent').checked = false;
-  consentSignature = '';
+  onlineClips = new Map();
 }
 function previewOnline() {
   const list = id('sendLines');
@@ -59,23 +54,19 @@ function updateOnlinePlan() {
     try {onlinePlan = planOnline(parsed.messages,{cache:onlineCache});} catch (error) {onlineIssue = error.message;}
   }
   const needed = Boolean(onlinePlan?.count);
-  id('onlineTerms').hidden = !needed;
-  if (!needed || (consentSignature && consentSignature !== JSON.stringify(onlinePlan.segments))) revokeConsent();
-  if (needed) id('onlineScope').textContent = '本次将发送 ' + onlinePlan.count + ' 段中文或中英混合正文，共 ' + onlinePlan.characters + ' 字符';
-  if (onlineMode()) id('quickIntro').textContent = onlineIssue || (onlinePlan && !needed
-    ? '纯英文可直接制卡。卡片里可选系统朗读，或选 Heart 女声和 Michael 男声在线配音。'
-    : '首次也无需下载模型。MyMemory 翻译后，可听系统朗读，或选 Heart 女声和 Michael 男声在线配音。');
-  if (onlineMode() && reviewLines && !needed && reviewedLines().some(line => !line.en)) id('quickIntro').textContent = '剩余符号可以直接在本页补写英文。';
-  else if (onlineMode() && onlineCache.size && onlinePlan) id('quickIntro').textContent = needed
-    ? '已完成的译文保留在本页，本次只发送还需要翻译的原句。'
-    : '本次所需译文已齐全，可以直接制卡。';
-  if (onlineMode()) id('generate').textContent = reviewLines && needed ? '只重试待译的 ' + onlinePlan.count + ' 段' : '▷ 生成在线快读卡';
+  id('onlineTerms').hidden = !onlineMode() || !parsed;
+  id('sendPreview').hidden = !needed;
+  if (onlineMode()) {
+    id('generate').setAttribute('aria-describedby','onlineScope onlineDisclosure');
+    id('onlineScope').textContent = needed
+      ? '将发送 ' + onlinePlan.count + ' 段正文（' + onlinePlan.characters + ' 字符）给 MyMemory 翻译，再将英文交给 TTS.ai 配音。'
+      : '本次仅将需要配音的英文交给 TTS.ai。';
+    id('quickIntro').textContent = onlineIssue || '自动翻译并按角色配音。默认交替使用 Heart 女声和 Michael 男声，可在下方调整。';
+    id('generate').textContent = reviewLines && needed ? '同意重试待译句并生成自然配音' : '同意并生成自然配音';
+  }
   previewOnline();
 }
 id('sendPreview').ontoggle = previewOnline;
-id('onlineConsent').onchange = () => {
-  consentSignature = id('onlineConsent').checked && onlinePlan ? JSON.stringify(onlinePlan.segments) : '';
-};
 let parsed = null, parseIssue = '', castNames = [], jobVersion = 0, working = false;
 let card = null, active = 0, playbackVersion = 0, openingAudio = false, endedAll = false;
 let cardVersion = 0, demoVersion = 0, saving = false;
@@ -234,22 +225,16 @@ function finishJob(summary) {
 function buildRoles(names, force = false) {
   const people = corpus?.people || names;
   const selected = choices();
-  const options = nativeMode() ? systemVoices.map(v => [v.key,v.name + ' · ' + v.lang])
-    : LOCAL_VOICES.map(value => [value,voiceLabels[value] || value]);
-  const available = options.map(([value]) => value);
+  const available = onlineMode() ? CLOUD_VOICES : LOCAL_VOICES;
   const present = new Set(people);
   for (const [name,voice] of selected) if (!present.has(name) || !available.includes(voice)) selected.delete(name);
   const reserved = new Set(selected.values());
-  const families = new Map(systemVoices.map(v => [v.key,v.family]));
-  const familyOf = voice => families.get(voice) || voice;
-  const usedFamilies = new Set([...reserved].map(familyOf));
   // Assign from the entire source so changing batches never changes someone's voice.
   for (const [i,name] of people.entries()) {
-    if (selected.has(name) || !available.length) continue;
-    const voice = available.find(v => !usedFamilies.has(familyOf(v))) || available.find(v => !reserved.has(v)) || available[i % available.length];
+    if (selected.has(name)) continue;
+    const voice = available.find(v => !reserved.has(v)) || available[i % available.length];
     selected.set(name,voice);
     reserved.add(voice);
-    usedFamilies.add(familyOf(voice));
   }
   if (!force && names.length === castNames.length && names.every((name,i) => name === castNames[i])) return;
   castNames = names;
@@ -259,9 +244,8 @@ function buildRoles(names, force = false) {
     row.className = 'cast-row';
     label.textContent = name;
     select.setAttribute('aria-label', name + ' 的声音');
-    for (const [value,caption] of options) select.add(new Option(caption,value));
-    if (voice) select.value = voice;
-    else select.add(new Option('未找到本地英语声音',''));
+    for (const value of available) select.add(new Option(voiceLabels[value] || value,value));
+    select.value = voice;
     select.disabled = working || !voice;
     select.onchange = () => selected.set(name, select.value);
     row.append(label,select);
@@ -269,45 +253,25 @@ function buildRoles(names, force = false) {
   });
   id('cast').replaceChildren(...rows);
 }
-function refreshVoices(force = false) {
-  if (nativeMode()) {
-    const next = localEnglishVoices();
-    const changed = next.length !== systemVoices.length || next.some((v,i) => v.key !== systemVoices[i]?.key);
-    systemVoices = next;
-    const count = next.length;
-    id('nativeSupport').textContent = count > 1 ? '这台设备有 ' + count + ' 种可用的本地英语声音，可在「角色与声音」中调整。'
-      : count === 1 ? '只检测到 1 种本地英语声音，所有角色将共用。'
-      : onlineMode() ? '这台设备暂未提供本地英语声音。生成译文后，可直接选在线自然配音。' : '浏览器暂未提供本地英语声音。可先在设备的语音设置中安装英语声音，再回到此页，或选用 Kokoro。';
-    force ||= changed;
-  }
-  if (force) buildRoles(parsed ? speakerNames(parsed.messages) : [],true);
-}
 function changeEngine() {
   cloud.cancel();
   reader.stop();
   paintTransport();
-  const native = nativeMode(), online = onlineMode();
+  const online = onlineMode();
   resetOnlineSelection();
+  if (!online) id('generate').removeAttribute('aria-describedby');
   id('packPanel').hidden = online;
   id('quickIntro').hidden = !online;
-  id('nativeSupport').hidden = !native;
-  id('downloadTitle').textContent = native ? '系统声音实时朗读 · 无需下载 Kokoro' : '首次生成约需下载 250 MB';
-  id('downloadNote').textContent = native
-    ? '仅使用设备已有的本地英语声音。纯英文可直接练习；中文首次仍需下载约 130 MB 的翻译模型。轻量模式不保存音频。'
-    : kokoroNote;
-  id('generate').textContent = online ? '▷ 生成在线快读卡' : native ? '▷ 生成本机朗读卡' : '▷ 生成英语听力卡';
+  id('generate').textContent = online ? '同意并生成自然配音' : '生成本机自然配音';
   resetJobProgress();
   id('packStatus').textContent = '';
   delete id('packStatus').dataset.ready;
-  refreshVoices(true);
+  buildRoles(parsed ? speakerNames(parsed.messages) : [],true);
   scan();
 }
 id('engine').onchange = changeEngine;
-globalThis.speechSynthesis?.addEventListener?.('voiceschanged', () => refreshVoices());
-window.addEventListener('pageshow', () => refreshVoices());
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) refreshVoices();
-  else if (reader.state !== 'idle') { reader.stop(); paintTransport(); }
+  if (document.hidden && reader.state !== 'idle') { reader.stop(); paintTransport(); }
 });
 const maxMessages = 60, maxCharacters = 6000;
 let scannedText, corpus, corpusError = '', prefix = [], importTicket = 0, readingFile = false;
@@ -381,8 +345,8 @@ function scan() {
   buildRoles(names);
   id('roles').hidden = !names.length;
   id('peopleCount').textContent = names.length + ' 位';
-  const count = nativeMode() ? systemVoices.length : LOCAL_VOICES.length;
-  id('roleHint').textContent = !count ? '请先在设备上准备本地英语声音。' : names.length > count
+  const count = onlineMode() ? CLOUD_VOICES.length : LOCAL_VOICES.length;
+  id('roleHint').textContent = names.length > count
     ? '可选 ' + count + ' 种声音，超过这个人数时会共用部分声音。' : '按发言顺序分配声音，可为每个人重新选择。';
 }
 function setReading(value) {
@@ -463,7 +427,8 @@ source.addEventListener('blur', () => {
 
 function setBusy(value) {
   working = value;
-  id('onlineConsent').disabled = value;
+  id('demo').disabled = id('applyProof').disabled = value;
+  id('cloudPanel').inert = id('proofPanel').inert = value;
   for (const field of id('reviewRows').querySelectorAll('textarea')) field.disabled = value;
   if (reviewLines) updateReviewSummary();
   if (!value) clearWaitHint();
@@ -478,7 +443,7 @@ function setBusy(value) {
   id('cancel').hidden = !value;
   id('generate').setAttribute('aria-busy',String(value));
   id('progress').classList.toggle('sr-only',value);
-  for (const select of id('cast').querySelectorAll('select')) select.disabled = value || nativeMode() && !systemVoices.length;
+  for (const select of id('cast').querySelectorAll('select')) select.disabled = value;
 }
 function cancelJob() {
   if (!working) return;
@@ -498,7 +463,7 @@ id('switchOnline').onclick = () => {
   cancelJob();
   id('engine').value = 'online';
   changeEngine();
-  if (onlinePlan?.count) id('onlineConsent').focus(); else source.focus();
+  id('generate').focus();
 };
 id('retryJob').onclick = () => {
   if (!working) return;
@@ -519,7 +484,7 @@ function reviewedLines() {
 function updateReviewSummary() {
   const lines = reviewedLines(), missing = lines.filter(line => !line.en).length, ready = lines.length - missing;
   id('reviewSummary').textContent = '已准备 ' + ready + ' / ' + lines.length + ' 句，尚有 ' + missing + ' 句待补。';
-  id('finishReview').textContent = missing ? '仅用已译的 ' + ready + ' 句制卡（略过 ' + missing + ' 句）' : '用完整译文生成听力卡';
+  id('finishReview').textContent = missing ? '同意为已译的 ' + ready + ' 句配音（略过 ' + missing + ' 句）' : '同意用完整译文生成自然配音';
   id('finishReview').disabled = working || ready === 0 || !!id('reviewRows').querySelector('[aria-invalid="true"]');
 }
 function showReview(lines) {
@@ -544,7 +509,7 @@ function showReview(lines) {
       if (valid) onlineCache.set(key,text); else onlineCache.delete(key);
       field.setAttribute('aria-invalid',String(!!text && !valid));
       detail.textContent = text && !valid ? '请填写可朗读的英文。' : valid ? '已在本页补好。' : reason;
-      revokeConsent();updateOnlinePlan();updateReviewSummary();
+      updateOnlinePlan();updateReviewSummary();
     };
     row.append(heading,original,detail,field);
     return row;
@@ -559,18 +524,10 @@ function dialogueTitle(messages) {
   return people.slice(0,2).join('、') + (people.length > 2 ? '等' : '') + '的对话';
 }
 id('finishReview').onclick = () => {
-  if (!reviewLines || working || id('finishReview').disabled) return;
-  const lines = reviewedLines().filter(line => line.en), total = reviewLines.length;
-  const partial = lines.length < total;
-  openCard({title:dialogueTitle(parsed.messages) + (partial ? '（节选 ' + lines.length + '/' + total + ' 句）' : ''),
-    lines,voices:new Map(choices()),native:true,online:true,demo:false});
-  if (!partial) clearReview();
-  revokeConsent();updateOnlinePlan();
-  finishJob(partial ? '已制成节选卡。待译的原句仍在上方，可以继续补全。' : '完整听力卡已就绪。');
-  showPlayer();
+  if (reviewLines && !id('finishReview').disabled) startGeneration(false,true);
 };
 id('generate').onclick = () => startGeneration(false);
-async function startGeneration(bypassCache) {
+async function startGeneration(bypassCache,useReady = false) {
   if (working || readingFile) return;
   resetJobProgress();
   scan();
@@ -579,23 +536,13 @@ async function startGeneration(bypassCache) {
     if (corpus && !id('range').hidden) { id('range').open = true; id('rangeFrom').focus(); } else source.focus();
     return;
   }
-  const native = nativeMode(), online = onlineMode();
+  const online = onlineMode();
   if (online) {
     const invalid = id('reviewRows').querySelector('[aria-invalid="true"]');
     if (invalid) {note(id('progress'),'请先改好或清空标出的英文。',true);invalid.focus();return;}
     if (onlineIssue) {note(id('progress'),onlineIssue,true);return;}
-    if (onlinePlan?.count && (!id('onlineConsent').checked || consentSignature !== JSON.stringify(onlinePlan.segments))) {
-      revokeConsent();
-      note(id('progress'),'请先查看本次要发送的正文并勾选同意，或改选纯本机模式。',true);
-      id('onlineConsent').focus();
-      return;
-    }
   }
-  if (native) {
-    refreshVoices();
-    if (!online && !systemVoices.length) { note(id('progress'),'这台设备暂时没有可用的本地英语声音。请安装英语声音后再试，或选用 Kokoro。',true); return; }
-  }
-  if (!online && (!native || parsed.messages.some(m => han.test(m.text))) && (!globalThis.isSecureContext || !globalThis.Worker || !globalThis.WebAssembly)) {
+  if (!online && (!globalThis.isSecureContext || !globalThis.Worker || !globalThis.WebAssembly)) {
     note(id('progress'),'本机生成需要通过 HTTPS 在新版 Safari 或 Chrome 中打开。',true);
     return;
   }
@@ -604,12 +551,9 @@ async function startGeneration(bypassCache) {
   cloud.cancel();
   demoVersion++;
   jobKind = 'card';
-  if (online) {
-    onlineRequest = new AbortController();
-    revokeConsent();
-  }
+  if (online) onlineRequest = new AbortController();
   setBusy(true);
-  showJob('prepare','prepare',online ? '准备在线快读' : '准备制作','正在检查所选消息、角色与英语台词。');
+  showJob('prepare','prepare',online ? '准备自然配音' : '准备制作','正在检查所选消息、角色与英语台词。');
   try {
     const reuse = !online && cachedTranslation?.original === original && cachedTranslation.selection === selection;
     if (reuse) {
@@ -617,7 +561,9 @@ async function startGeneration(bypassCache) {
       showJob('translate','cache','复用本次选区的译文','已完成的英文稿保存在本页。',{unit:'lines',loaded:count,total:count});
     }
     let lines;
-    if (online) {
+    if (useReady) {
+      lines = reviewedLines().filter(line => line.en);
+    } else if (online) {
       lines = await translateOnline(input,info => {
         if (live()) showJob('online','translate','MyMemory 在线翻译',info.message,info);
       },{signal:onlineRequest.signal,cache:onlineCache});
@@ -631,15 +577,23 @@ async function startGeneration(bypassCache) {
       note(id('progress'),'已保留本次结果。请核对上方列出的待译原句。');
       return;
     }
-    clearReview();
-    if (!online) cachedTranslation = {original,selection,lines};
-    const title = dialogueTitle(input);
-    if (native) {
-      openCard({title,lines,voices,native:true,online,demo:false});
-      finishJob(online ? '已准备 ' + lines.length + ' 段英文，可在卡片里选择「自然双人配音」。' : '已准备 ' + lines.length + ' 段，点「播放」使用本地系统声音。');
+    const partial = useReady && lines.length < reviewLines.length;
+    const title = dialogueTitle(input) + (partial ? '（节选 ' + lines.length + '/' + reviewLines.length + ' 句）' : '');
+    if (online) {
+      const ready = await renderCloudDialogue(lines,voices,onlineClips,onlineRequest.signal,(i,line,voice) => {
+        if (live()) showJob('synthesize','online','逐句生成自然配音',
+          '第 ' + (i+1) + ' / ' + lines.length + ' 句 · ' + line.speaker + ' · ' + voiceLabels[voice],
+          {unit:'lines',loaded:i,total:lines.length});
+      });
+      if (!live()) return;
+      if (!partial) clearReview();
+      openCard({title,lines:ready,voices,cloud:true});
+      finishJob('已生成 ' + ready.length + ' 句自然配音，点「播放」即可跟读。' + (partial ? '待译原句仍在制作台。' : ''));
       showPlayer();
       return;
     }
+    clearReview();
+    cachedTranslation = {original,selection,lines};
     const ready = [];
     showModel('voice-model',{phase:'prepare',message:'正在启动本机语音组件，并检查所需的声音文件。'});
     for (const [i,line] of lines.entries()) {
@@ -663,11 +617,11 @@ async function startGeneration(bypassCache) {
   } catch (error) {
     if (live()) {
       const panel = id('jobProgress'), stage = panel.dataset.stage;
-      const voiceFailed = !native && ['voice-model','synthesize'].includes(stage);
+      const voiceFailed = ['voice-model','synthesize'].includes(stage);
       const where = id('jobStage').textContent, metric = id('jobMetric').textContent;
       resetJobProgress();
       note(id('progress'),'生成未完成（' + where + (metric ? '，' + metric : '') + '）。' + (error.message || '请重试。') +
-        (online ? ' 原文已保留。重试时请再次确认发送。' : voiceFailed ? ' 译文已保留在本页，可改选「纯本机翻译 · 系统朗读」直接使用。' : ' 原文仍在，点生成可重试。'),true);
+        (online ? ' 原文、已完成的翻译和配音留在本页，可重试剩余部分。' : voiceFailed ? ' 译文已保留在本页，可以重试配音。' : ' 原文仍在，点生成可重试。'),true);
     }
   } finally {
     if (live()) { onlineRequest = null; releaseLocalVoice(); setBusy(false); }
@@ -699,6 +653,7 @@ function loadDemo() {
 }
 loadDemo().catch(() => {}); // Small same-site demo metadata only. Models are loaded by Generate.
 id('demo').onclick = async () => {
+  if (working) return;
   const token = ++demoVersion;
   cloud.cancel();
   id('demo').disabled = true;
@@ -722,10 +677,10 @@ function clearAudio() {
   audio.load();
   if (card) for (const url of card.urls) if (url.startsWith('blob:')) URL.revokeObjectURL(url);
 }
-const cloud = cloudPanel((previous,lines) => {
+const cloud = cloudPanel((previous,lines,voices) => {
   if (card !== previous) return;
   const title = id('practiceTitle').value.trim() || previous.title;
-  openCard({title,lines,cloud:true,resumeIndex:active});
+  openCard({title,lines,voices,cloud:true,resumeIndex:active});
   note(id('playerNote'),'自然配音已就绪，点「播放」听对话。');
   showPlayer();
 });
@@ -733,8 +688,14 @@ const proof = id('proofPanel');
 const shortReply = text => /^\p{Script=Han}{1,2}[。！？!?，,]*$/u.test(text.trim());
 proof.ontoggle = () => {
   const rows = id('proofRows');
-  if (!proof.open || proof.hidden) {rows.replaceChildren();return;}
+  if (!proof.open || proof.hidden) {
+    if (!proof.hidden && card?.cloud) cloud.cancel();
+    rows.replaceChildren();
+    if (!proof.hidden && card?.native && card.online) id('cloudPanel').hidden = false;
+    return;
+  }
   cloud.cancel();
+  id('applyProof').disabled = working;
   id('cloudPanel').hidden = true;
   const fields = card.lines.map((line,i) => {
     const label = document.createElement('label'), original = document.createElement('span'), field = document.createElement('textarea');
@@ -746,9 +707,8 @@ proof.ontoggle = () => {
   rows.replaceChildren(...fields);
   note(id('proofNote'),'');
 };
-proof.addEventListener('toggle',() => {if (!proof.open && !proof.hidden && card) id('cloudPanel').hidden = false;});
-id('applyProof').onclick = () => {
-  if (!proof.open || proof.hidden || !card?.online) return;
+id('applyProof').onclick = async () => {
+  if (!proof.open || proof.hidden || working || id('applyProof').disabled) return;
   const fields = [...id('proofRows').querySelectorAll('textarea')];
   if (fields.length !== card.lines.length) return;
   const invalid = fields.findIndex((field,i) => !isReadableEnglish(field.value) && field.value.trim() !== card.lines[i].en);
@@ -757,8 +717,33 @@ id('applyProof').onclick = () => {
     fields[invalid].focus();return;
   }
   const lines = card.lines.map((line,i) => ({...line,en:fields[i].value.trim()}));
-  openCard({title:id('practiceTitle').value.trim() || card.title,lines,native:true,online:true,voices:card.voices,resumeIndex:active},true);
-  note(id('playerNote'),'已更新英文台词。');
+  if (lines.every((line,i) => line.en === card.lines[i].en)) {
+    note(id('proofNote'),'英文没有变化。');return;
+  }
+  const title = id('practiceTitle').value.trim() || card.title, voices = card.voices;
+  if (card.cloud) {
+    const target = card;
+    id('applyProof').disabled = true;
+    for (const field of fields) field.disabled = true;
+    try {
+      const ready = await cloud.render(lines,(i,line,voice) => {
+        note(id('proofNote'),'正在整理第 ' + (i+1) + ' / ' + lines.length + ' 句 · ' + voiceLabels[voice]);
+      });
+      if (card !== target || !proof.open) return;
+      openCard({title,lines:ready,voices,cloud:true,resumeIndex:active});
+    } catch (error) {
+      if (card === target && proof.open && error.name !== 'AbortError') note(id('proofNote'),error.message,true);
+      return;
+    } finally {
+      if (card === target) {
+        id('applyProof').disabled = working;
+        for (const field of fields) field.disabled = false;
+      }
+    }
+  } else {
+    openCard({title,lines,native:true,online:true,voices,resumeIndex:active},true);
+  }
+  note(id('playerNote'),'已更新英文台词，点「播放」即可跟读。');
 };
 function openCard(next,keepCloudVoices = false) {
   clearAudio();
@@ -768,7 +753,10 @@ function openCard(next,keepCloudVoices = false) {
   endedAll = false;
   id('repeatLine').checked = false;
   card = {...next,urls:next.native ? [] : next.lines.map(line => line.blob ? URL.createObjectURL(line.blob) : line.audio)};
-  proof.hidden = !next.online || !next.native;
+  proof.hidden = !(next.native && next.online || next.cloud && next.voices?.size);
+  id('proofDisclosure').textContent = next.cloud ? '重新配音时，TTS.ai 会收到需要新录音的英文和对应音色。未修改的录音直接复用。'
+    : '此旧版卡片使用本机朗读。修改英文只会更新本机台词。';
+  id('applyProof').textContent = next.cloud ? '同意并为修改的英文重新配音' : '使用修改后的英文';
   const shortCount = next.lines.filter(line => shortReply(line.zh)).length;
   id('proofHint').textContent = shortCount ? shortCount + ' 句短回复建议结合上下文核对' : '按上下文修改译文';
   proof.open = false;
@@ -1009,7 +997,7 @@ changeEngine();
 id('preparePack').onclick = () => preparePack(false);
 async function preparePack(bypassCache) {
   if (onlineMode() || working || readingFile) return;
-  const native = nativeMode(), token = ++jobVersion;
+  const token = ++jobVersion;
   const live = () => jobVersion === token;
   jobKind = 'pack';
   resetJobProgress();
@@ -1021,17 +1009,15 @@ async function preparePack(bypassCache) {
       if (live()) showTranslation(info);
     },{bypassCache});
     if (!live()) return;
-    if (!native) {
-      for (const voice of ['af_heart','am_michael']) {
-        await renderLocalVoice('Hi.',voice,(message,detail) => {
-          if (!live()) return;
-          if (detail?.stage === 'load') showModel('voice-model',detail);
-          else showJob('check','synthesize','检查配音',voice === 'af_heart' ? '正在测试 Heart 女声。' : '正在测试 Michael 男声。');
-        },{bypassCache});
+    for (const voice of ['af_heart','am_michael']) {
+      await renderLocalVoice('Hi.',voice,(message,detail) => {
         if (!live()) return;
-      }
+        if (detail?.stage === 'load') showModel('voice-model',detail);
+        else showJob('check','synthesize','检查配音',voice === 'af_heart' ? '正在测试 Heart 女声。' : '正在测试 Michael 男声。');
+      },{bypassCache});
+      if (!live()) return;
     }
-    const result = native ? '翻译模型检查完成。可以导入中文聊天了。' : '翻译和双人配音均已试运行。可以导入聊天了。';
+    const result = '翻译和双人配音均已试运行。可以导入聊天了。';
     note(id('packStatus'),result);
     id('packStatus').dataset.ready = 'true';
     showJob('complete','complete','准备完成',result,{unit:'complete',loaded:1,total:1});

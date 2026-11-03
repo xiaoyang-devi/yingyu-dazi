@@ -10,8 +10,8 @@
   <meta name="apple-mobile-web-app-title" content="英语搭子">
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="./style.css?v=10">
-  <script type="module" src="./app.js?v=10.1"></script>
+  <link rel="stylesheet" href="./style.css?v=11">
+  <script type="module" src="./app.js?v=11"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -37,24 +37,28 @@
         <div class="range-row"><label>从第 <input type="number" id="rangeFrom" min="1" step="1" inputmode="numeric" value="1"> 条</label><label>到第 <input type="number" id="rangeTo" min="1" step="1" inputmode="numeric" value="1"> 条</label><div class="range-actions"><button type="button" id="prevRange" class="plain">上一段</button><button type="button" id="nextRange" class="plain">下一段</button></div></div>
         <p id="rangeNote" class="small" role="status"></p><p id="rangePreview" class="small"></p>
       </details>
-      <p class="field-label"><label for="engine">制作方式 </label><select id="engine" autocomplete="off"><option value="online" selected>在线快读 · 免下载模型</option><option value="native">纯本机翻译 · 系统朗读</option><option value="kokoro">纯本机翻译 · Kokoro 配音</option></select></p>
-      <p id="quickIntro" class="small">生成译文后，可直接朗读，也可选 Heart 女声和 Michael 男声在线配音。</p>
-      <p id="nativeSupport" class="small" role="status" hidden></p>
+      <p class="field-label"><label for="engine">配音方式 </label><select id="engine" autocomplete="off"><option value="online" selected>在线自然配音 · 免下载</option><option value="kokoro">纯本机配音 · 首次需下载模型</option></select></p>
+      <p id="quickIntro" class="small">默认用 Heart 女声和 Michael 男声接话。在「角色与声音」里可以给每个人换声。</p>
       <details id="roles" hidden><summary><span>角色与声音 <small id="peopleCount"></small></span><span class="adjust">调整</span></summary><div id="cast"></div><p class="small" id="roleHint">按发言顺序分配声音，可为每个人重新选择。</p></details>
       <section id="translationReview" class="translation-review" aria-labelledby="reviewHeading" hidden>
         <h3 id="reviewHeading" tabindex="-1">核对待补的英文</h3>
         <p id="reviewSummary" class="small" role="status"></p>
-        <p class="small">可以直接补英文，修改留在本页。也可以在下方重新同意，只重试待译的原句。</p>
+        <p class="small">可以直接补英文，或在下方重试待译的原句。</p>
         <div id="reviewRows"></div>
-        <button id="finishReview" class="plain" type="button"></button>
+        <p class="small" id="reviewDisclosure">按下面的配音按钮，即同意本次把已准备好的英文和音色交给 TTS.ai。未补的句子会跳过。</p>
+        <button id="finishReview" class="plain" type="button" aria-describedby="reviewDisclosure"></button>
       </section>
       <div id="onlineTerms" class="online-terms" hidden>
         <strong id="onlineScope"></strong>
-        <p>MyMemory 可能长期保存提交的句子，并交给翻译合作方处理。昵称栏、时间栏和 ZIP 附件留在本机。请先删去正文中不想外发的信息。<a href="https://mymemory.translated.net/terms-and-conditions" target="_blank" rel="noopener noreferrer">服务条款</a></p>
-        <details id="sendPreview"><summary>查看本次要发送的正文</summary><ol id="sendLines"></ol></details>
-        <label><input id="onlineConsent" autocomplete="off" type="checkbox"> 同意本次发送所选正文给 MyMemory</label>
+        <p id="onlineDisclosure">点击生成即同意本次发送。配音时会附上所选音色。昵称栏、时间栏和附件留在设备上，正文里提到的人名会随句发送。</p>
+        <details id="sendPreview"><summary>查看待翻译的原句</summary><ol id="sendLines"></ol></details>
+        <details class="service-info"><summary>了解数据使用和免费额度</summary>
+          <p>MyMemory 可能长期保存原句并交给翻译合作方处理。TTS.ai 暂存生成的录音，免费配音仅供个人非商业练习。</p>
+          <p>制作听力卡不会扣 ChatGPT 的使用额度。两家服务各有免费用量和频率限制。</p>
+          <p><a href="https://mymemory.translated.net/terms-and-conditions" target="_blank" rel="noopener noreferrer">MyMemory 服务条款</a> · <a href="https://tts.ai/privacy/" target="_blank" rel="noopener noreferrer">TTS.ai 隐私政策</a> · <a href="https://tts.ai/terms/" target="_blank" rel="noopener noreferrer">TTS.ai 使用条款</a></p>
+        </details>
       </div>
-      <div class="generate-bar"><button id="generate" class="primary" type="button"><span aria-hidden="true">▷</span> 生成在线快读卡</button></div>
+      <div class="generate-bar"><button id="generate" class="primary" type="button">同意并生成自然配音</button></div>
       <details id="packPanel" class="pack-panel" hidden><summary id="packToggle"><span><i class="pack-dot" aria-hidden="true"></i><strong id="downloadTitle">首次下载约 250 MB</strong><small>可提前准备</small></span><span class="adjust"></span></summary>
         <p id="downloadNote" class="small">首次使用时，翻译和配音文件从本站下载。建议先在 Wi-Fi 下准备，再导入聊天。重新打开网页后需再导入未保存的原文。模型会用一小句示例测试。</p>
         <label class="awake-option"><input id="stayAwake" type="checkbox"> 制作时尽量保持亮屏</label>
@@ -65,7 +69,7 @@
         <div class="job-track"><progress id="jobBar" max="100" aria-labelledby="jobStage" aria-describedby="jobDetail"></progress></div>
         <div class="job-bottom"><p id="jobDetail"></p><button id="cancel" type="button" class="plain" hidden>取消生成</button></div>
         <p id="checkpointNote" class="small" hidden></p><p id="foregroundNote" class="small">iPhone 切到后台或锁屏时，下载可能暂停。请尽量保持本页在前台。</p>
-        <button id="switchOnline" type="button" class="plain" hidden>改用在线快读，保留原文</button>
+        <button id="switchOnline" type="button" class="plain" hidden>改用在线自然配音</button>
         <div id="jobWait" hidden><p id="waitHint" role="status"></p><button id="retryJob" type="button" class="plain">重新尝试</button></div>
       </div>
       <div class="job-line"><p id="progress" aria-live="polite" aria-atomic="true" role="status"></p></div>
@@ -74,8 +78,8 @@
       <div class="player-heading"><div class="section-head"><div class="kicker">02 <span></span> LISTEN</div><h2 id="cardTitle" tabindex="-1"></h2><p id="cardMeta" class="small"></p></div></div>
       <details id="proofPanel" class="cloud-panel" hidden>
         <summary><span>校对英文<small id="proofHint">按上下文修改译文</small></span><span class="adjust">编辑</span></summary>
-        <div class="cloud-body"><p class="small">修改仅在本页生效，保存后朗读和字幕都会使用新台词。</p>
-          <div id="proofRows"></div><button type="button" id="applyProof" class="plain">使用修改后的英文</button>
+        <div class="cloud-body"><p class="small" id="proofDisclosure">可以按上下文修改英文。重新配音时，TTS.ai 会收到需要新录音的英文台词和对应音色。</p>
+          <div id="proofRows"></div><button type="button" id="applyProof" class="plain" aria-describedby="proofDisclosure">同意并为修改的英文重新配音</button>
           <p id="proofNote" class="small" role="status"></p>
         </div>
       </details>
@@ -108,7 +112,7 @@
       <div class="intro"><div><div class="kicker"><span></span> LISTEN AGAIN</div><h1 id="libraryTitle">我的练习<span class="period">。</span></h1><p>打开一张卡，从上次听到的那句继续。</p></div></div>
       <div class="work-card shelf"><div class="shelf-heading"><h2>已保存的听力卡</h2><span id="libraryCount" class="counter"></span></div><p class="small">保存在当前设备和浏览器。清理网站数据会移除卡片。</p><p id="libraryStatus" role="status" class="small"></p><div id="practiceList"></div><button type="button" id="returnStudio" class="plain">去制作听力卡</button></div>
     </section>
-    <footer><div class="footer-tools"><span>英语搭子 <b>／</b> <a href="./demo/CREDITS.txt">试听来源</a> · <a href="./assets/NOTICE.html">模型与许可</a></span><button type="button" id="shareSite" class="footer-link">分享网站</button><button type="button" id="installHelp" class="footer-link" aria-expanded="false" aria-controls="installTip">添加到 iPhone 主屏幕</button></div><p>在线翻译和在线配音分别征求同意。纯本机模式的翻译、配音和练习都留在设备上。</p><p id="installTip" hidden>在 iPhone 的 Safari 中打开本站，点分享菜单中的「添加到主屏幕」，再点「添加」。以后请从同一入口打开「我的练习」。</p><p id="shareStatus" role="status"></p></footer>
+    <footer><div class="footer-tools"><span>英语搭子 <b>／</b> <a href="./demo/CREDITS.txt">试听来源</a> · <a href="./assets/NOTICE.html">模型与许可</a></span><button type="button" id="shareSite" class="footer-link">分享网站</button><button type="button" id="installHelp" class="footer-link" aria-expanded="false" aria-controls="installTip">添加到 iPhone 主屏幕</button></div><p>在线制作时，每次点击生成才会发送所选台词。纯本机模式的翻译、配音和练习都留在设备上。</p><p id="installTip" hidden>在 iPhone 的 Safari 中打开本站，点分享菜单中的「添加到主屏幕」，再点「添加」。以后请从同一入口打开「我的练习」。</p><p id="shareStatus" role="status"></p></footer>
   </main>
   <audio id="audio" preload="auto" playsinline></audio>
 </body></html>

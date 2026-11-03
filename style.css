@@ -115,11 +115,11 @@ input[type=checkbox]{accent-color:var(--dark)}.plain,summary,.file-pick,select,.
 #formatHelp,.footer-link{padding:4px;border:0;background:none;color:var(--muted);font-size:12px;text-decoration:underline;text-underline-offset:3px;min-height:44px}
 footer{display:block}.footer-tools{gap:5px 12px}footer p{margin:0 0 4px}#shareStatus{overflow-wrap:anywhere}
 
-#quickIntro{margin:2px 0 6px}#nativeSupport:empty{display:none}
+#quickIntro{margin:2px 0 6px}
 .online-terms{border:1px solid #cbd5bb;border-inline-start:3px solid #728c58;background:#f5f7eb;border-radius:9px;margin:10px 0 0;padding:10px 13px;font-size:13px;color:#3e5347}
 .online-terms strong{color:var(--ink)}.online-terms p{margin:3px 0}.online-terms summary{font-size:13px;text-decoration:underline;justify-content:flex-start;color:var(--muted);min-height:44px}
 .online-terms ol{max-height:12em;overflow:auto;margin:0 0 7px;padding:6px 4px 6px 28px;overscroll-behavior:contain;background:var(--white);border-radius:6px}.online-terms li{white-space:pre-wrap;overflow-wrap:anywhere}
-.online-terms label{display:flex;align-items:center;gap:8px;min-height:44px;font-weight:650}.online-terms input{width:18px;height:18px;flex:none}#switchOnline{margin-top:8px}
+.service-info[open] p{margin:4px 0 8px}.service-info a{text-underline-offset:2px}#switchOnline{margin-top:8px}
 
 .cloud-panel{border:1px solid #bfceaf;border-radius:11px;margin:0 0 14px;background:#f4f7eb}
 .cloud-panel>summary{padding:7px 12px;color:var(--dark)}
