@@ -10,8 +10,8 @@
   <meta name="apple-mobile-web-app-title" content="英语搭子">
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="./style.css">
-  <script type="module" src="./app.js"></script>
+  <link rel="stylesheet" href="./style.css?v=2">
+  <script type="module" src="./app.js?v=2"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -29,8 +29,10 @@
       <label class="field-label" for="source">每行一条。没有昵称时，可自行补上「甲」「乙」等称呼</label>
       <textarea id="source" rows="5" spellcheck="false" placeholder="小夏：你带伞了吗？&#10;阿远：带了，一起走吧。"></textarea>
       <div class="input-meta"><span id="materials">支持中文、英文和中英混合聊天</span><span id="characters">0 / 6,000</span></div>
+      <p class="field-label"><label for="engine">朗读方式 </label><select id="engine"><option value="kokoro" selected>Kokoro 配音 · 可保存跟读音频</option><option value="native">轻量朗读 · 本机系统声音</option></select></p>
+      <p id="nativeSupport" class="small" role="status" hidden></p>
       <details id="roles" hidden><summary><span>角色与声音 <small id="peopleCount"></small></span><span class="adjust">调整</span></summary><div id="cast"></div><p class="small" id="roleHint">按发言顺序分配声音，可为每个人重新选择。</p></details>
-      <div class="generate-bar"><div class="download-note"><strong>首次生成约需下载 250 MB</strong><span>中文由 Marian 翻译，英语由 Kokoro 配音。纯英文句直接朗读。建议连接 Wi-Fi，生成时保持页面打开，练习时对照原文核对译意。</span></div><button id="generate" class="primary" type="button"><span aria-hidden="true">▷</span> 生成英语听力卡</button></div>
+      <div class="generate-bar"><div class="download-note"><strong id="downloadTitle">首次生成约需下载 250 MB</strong><span id="downloadNote">中文由 Marian 翻译，英语由 Kokoro 配音。纯英文句直接朗读。建议连接 Wi-Fi，生成时保持页面打开，练习时对照原文核对译意。</span></div><button id="generate" class="primary" type="button"><span aria-hidden="true">▷</span> 生成英语听力卡</button></div>
       <div class="job-line"><p id="progress" aria-live="polite" role="status"></p><button id="cancel" type="button" class="plain" hidden>取消生成</button></div>
     </section>
     <section class="work-card player" id="player" aria-labelledby="cardTitle" hidden>
@@ -46,7 +48,7 @@
       <p id="playerNote" role="status" class="small">点任意一句从这里听。</p>
       <div id="lines" class="lines" aria-label="逐句对话"></div>
     </section>
-    <footer><span>英语搭子 <b>／</b> <a href="./demo/CREDITS.txt">示例与模型来源</a></span><p>模型在设备上运行。聊天和生成的音频留在当前页面，想留存时可下载跟读文件。</p></footer>
+    <footer><span>英语搭子 <b>／</b> <a href="./demo/CREDITS.txt">示例与模型来源</a></span><p>模型在设备上运行。聊天和生成的音频留在当前页面，Kokoro 配音卡可下载留存。</p></footer>
   </main>
   <audio id="audio" preload="auto" playsinline></audio>
 </body></html>

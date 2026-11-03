@@ -1,6 +1,7 @@
 import {parseText} from './intake.js';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js';
+import {localEnglishVoices, createLocalReader} from './native-speech.js';
 
 const id = key => document.getElementById(key);
 const source = id('source'), audio = id('audio');
@@ -13,7 +14,12 @@ const voiceLabels = {
 const speakerNames = messages => [...new Set(messages.map(m => m.speaker))];
 const pad = n => String(n).padStart(2,'0');
 const han = /\p{Script=Han}/u;
-const choices = new Map();
+const reader = createLocalReader();
+const nativeMode = () => id('engine').value === 'native';
+const castChoices = {kokoro:new Map(),native:new Map()};
+const choices = () => castChoices[id('engine').value];
+const kokoroNote = id('downloadNote').textContent;
+let systemVoices = [], cachedTranslation = null;
 let parsed = null, parseIssue = '', castNames = [], jobVersion = 0, working = false;
 let card = null, active = 0, playbackVersion = 0, openingAudio = false, endedAll = false;
 let cardVersion = 0, demoVersion = 0, saving = false;
@@ -22,27 +28,74 @@ function note(node, message, error = false) {
   node.textContent = message;
   node.dataset.kind = error ? 'error' : 'info';
 }
-function buildRoles(names) {
-  if (names.length === castNames.length && names.every((name, i) => name === castNames[i])) return;
+function buildRoles(names, force = false) {
+  if (!force && names.length === castNames.length && names.every((name, i) => name === castNames[i])) return;
   castNames = names;
-  for (const name of choices.keys()) if (!names.includes(name)) choices.delete(name);
-  const reserved = new Set(choices.values());
+  const selected = choices();
+  const options = nativeMode() ? systemVoices.map(v => [v.key,v.name + ' · ' + v.lang])
+    : LOCAL_VOICES.map(value => [value,voiceLabels[value] || value]);
+  const available = options.map(([value]) => value);
+  for (const [name,voice] of selected) if (!names.includes(name) || !available.includes(voice)) selected.delete(name);
+  const reserved = new Set(selected.values());
+  const families = new Map(systemVoices.map(v => [v.key,v.family]));
+  const familyOf = voice => families.get(voice) || voice;
+  const usedFamilies = new Set([...reserved].map(familyOf));
   const rows = names.map((name, i) => {
-    const voice = choices.get(name) || LOCAL_VOICES.find(v => !reserved.has(v)) || LOCAL_VOICES[i % LOCAL_VOICES.length];
-    choices.set(name, voice);
-    reserved.add(voice);
+    const voice = selected.get(name) || available.find(v => !usedFamilies.has(familyOf(v))) ||
+      available.find(v => !reserved.has(v)) || available[i % available.length];
+    if (voice) {
+      selected.set(name, voice);
+      reserved.add(voice);
+      usedFamilies.add(familyOf(voice));
+    }
     const row = document.createElement('label'), label = document.createElement('span'), select = document.createElement('select');
     row.className = 'cast-row';
     label.textContent = name;
     select.setAttribute('aria-label', name + ' 的声音');
-    for (const value of LOCAL_VOICES) select.add(new Option(voiceLabels[value] || value,value));
-    select.value = voice;
-    select.onchange = () => choices.set(name, select.value);
+    for (const [value,caption] of options) select.add(new Option(caption,value));
+    if (voice) select.value = voice;
+    else select.add(new Option('未找到本地英语声音',''));
+    select.disabled = working || !voice;
+    select.onchange = () => selected.set(name, select.value);
     row.append(label,select);
     return row;
   });
   id('cast').replaceChildren(...rows);
 }
+function refreshVoices(force = false) {
+  if (nativeMode()) {
+    const next = localEnglishVoices();
+    const changed = next.length !== systemVoices.length || next.some((v,i) => v.key !== systemVoices[i]?.key);
+    systemVoices = next;
+    const count = next.length;
+    id('nativeSupport').textContent = count > 1 ? '这台设备有 ' + count + ' 种可用的本地英语声音，可在「角色与声音」中调整。'
+      : count === 1 ? '只检测到 1 种本地英语声音，所有角色将共用。'
+      : '浏览器暂未提供本地英语声音。可先在设备的语音设置中安装英语声音，再回到此页，或选用 Kokoro。';
+    force ||= changed;
+  }
+  if (force) buildRoles(parsed ? speakerNames(parsed.messages) : [],true);
+}
+function changeEngine() {
+  reader.stop();
+  paintTransport();
+  const native = nativeMode();
+  id('nativeSupport').hidden = !native;
+  id('downloadTitle').textContent = native ? '系统声音实时朗读 · 无需下载 Kokoro' : '首次生成约需下载 250 MB';
+  id('downloadNote').textContent = native
+    ? '仅使用设备已有的本地英语声音。纯英文可直接练习；中文首次仍需下载约 130 MB 的翻译模型。轻量模式不保存音频。'
+    : kokoroNote;
+  id('generate').textContent = native ? '▷ 准备轻量朗读' : '▷ 生成英语听力卡';
+  note(id('progress'),'');
+  refreshVoices(true);
+  scan();
+}
+id('engine').onchange = changeEngine;
+globalThis.speechSynthesis?.addEventListener?.('voiceschanged', () => refreshVoices());
+window.addEventListener('pageshow', () => refreshVoices());
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshVoices();
+  else if (reader.state !== 'idle') { reader.stop(); paintTransport(); }
+});
 function scan() {
   const text = source.value, amount = [...text].length;
   parsed = null;
@@ -63,11 +116,13 @@ function scan() {
   id('materials').textContent = parsed
     ? names.length + ' 位发言人 · ' + parsed.messages.length + ' 条文字' + (parsed.skipped ? ' · 已跳过 ' + parsed.skipped + ' 条' : '')
     : text.trim() ? '请用「名字：内容」标明发言人' : '支持中文、英文和中英混合聊天';
-  id('roleHint').textContent = names.length > LOCAL_VOICES.length
-    ? '可选 ' + LOCAL_VOICES.length + ' 种声音，超过这个人数时会共用部分声音。' : '按发言顺序分配声音，可为每个人重新选择。';
+  const count = nativeMode() ? systemVoices.length : LOCAL_VOICES.length;
+  id('roleHint').textContent = !count ? '请先在设备上准备本地英语声音。' : names.length > count
+    ? '可选 ' + count + ' 种声音，超过这个人数时会共用部分声音。' : '按发言顺序分配声音，可为每个人重新选择。';
 }
 source.addEventListener('input', () => {
   if (working) cancelJob();
+  cachedTranslation = null;
   note(id('progress'),'');
   scan();
 });
@@ -78,10 +133,10 @@ source.addEventListener('blur', () => {
 function setBusy(value) {
   working = value;
   source.readOnly = value;
-  id('generate').disabled = value;
+  id('generate').disabled = id('engine').disabled = value;
   id('cancel').hidden = !value;
   id('editor').setAttribute('aria-busy',String(value));
-  for (const select of id('cast').querySelectorAll('select')) select.disabled = value;
+  for (const select of id('cast').querySelectorAll('select')) select.disabled = value || nativeMode() && !systemVoices.length;
 }
 function cancelJob() {
   if (!working) return;
@@ -89,7 +144,7 @@ function cancelJob() {
   cancelLocalTranslation();
   releaseLocalVoice();
   setBusy(false);
-  note(id('progress'),'已取消。原文仍在，可以调整后再试。');
+  note(id('progress'),nativeMode() ? '已取消。原文仍在，可以调整后再试。' : '已取消。你可以改选「轻量朗读」继续，原文仍在。');
 }
 id('cancel').onclick = cancelJob;
 
@@ -117,19 +172,33 @@ id('generate').onclick = async () => {
   if (working) return;
   scan();
   if (!parsed) { note(id('progress'),parseIssue || '请先粘贴一段带发言人名字的聊天。',true); source.focus(); return; }
-  if (!globalThis.isSecureContext || !globalThis.Worker || !globalThis.WebAssembly) {
+  const native = nativeMode();
+  if (native) {
+    refreshVoices();
+    if (!systemVoices.length) { note(id('progress'),'这台设备暂时没有可用的本地英语声音。请安装英语声音后再试，或选用 Kokoro。',true); return; }
+  }
+  if ((!native || parsed.messages.some(m => han.test(m.text))) && (!globalThis.isSecureContext || !globalThis.Worker || !globalThis.WebAssembly)) {
     note(id('progress'),'本机生成需要通过 HTTPS 在新版 Safari 或 Chrome 中打开。',true);
     return;
   }
-  const token = ++jobVersion, input = parsed.messages, voices = new Map(choices);
+  const token = ++jobVersion, input = parsed.messages, voices = new Map(choices()), original = source.value;
   const live = () => token === jobVersion;
   const tell = message => { if (live() && message) note(id('progress'),message); };
   demoVersion++;
   setBusy(true);
   tell('正在按发言顺序整理对话…');
   try {
-    const lines = await makeLines(input,tell);
+    const lines = cachedTranslation?.original === original ? cachedTranslation.lines : await makeLines(input,tell);
     if (!live()) return;
+    cachedTranslation = {original,lines};
+    const people = speakerNames(input);
+    const title = people.slice(0,2).join('、') + (people.length > 2 ? '等' : '') + '的对话';
+    if (native) {
+      openCard({title,lines,voices,native:true,demo:false});
+      tell('已准备 ' + lines.length + ' 段，点「播放」使用本地系统声音。');
+      showPlayer();
+      return;
+    }
     const ready = [];
     for (const [i,line] of lines.entries()) {
       const stage = '配音 ' + (i+1) + ' / ' + lines.length + ' · ' + line.speaker;
@@ -139,12 +208,11 @@ id('generate').onclick = async () => {
       if (!(blob instanceof Blob) || blob.size < 44) throw Error('录音内容不完整，请重试。');
       ready.push({...line,blob});
     }
-    const people = speakerNames(input);
-    openCard({title:people.slice(0,2).join('、') + (people.length > 2 ? '等' : '') + '的对话',lines:ready,demo:false});
+    openCard({title,lines:ready,demo:false});
     tell('已生成 ' + ready.length + ' 段英语。点「播放」开始听。');
     showPlayer();
   } catch (error) {
-    if (live()) note(id('progress'),'生成未完成。' + (error.message || '请分段重试。'),true);
+    if (live()) note(id('progress'),'生成未完成。' + (error.message || '请分段重试。') + (native ? '' : ' 可改选「轻量朗读」继续。'),true);
   } finally {
     if (live()) { releaseLocalVoice(); setBusy(false); }
   }
@@ -189,6 +257,7 @@ id('demo').onclick = async () => {
 
 function showPlayer() { id('player').scrollIntoView({block:'start',behavior:'auto'}); }
 function clearAudio() {
+  reader.stop();
   playbackVersion++;
   openingAudio = false;
   audio.pause();
@@ -202,11 +271,11 @@ function openCard(next) {
   saving = false;
   active = 0;
   endedAll = false;
-  card = {...next,urls:next.lines.map(line => line.blob ? URL.createObjectURL(line.blob) : line.audio)};
+  card = {...next,urls:next.native ? [] : next.lines.map(line => line.blob ? URL.createObjectURL(line.blob) : line.audio)};
   id('cardTitle').textContent = next.title;
-  id('cardMeta').textContent = (next.demo ? '双人试听 · ' : '本机生成 · ') + next.lines.length + ' 段对白';
+  id('cardMeta').textContent = (next.native ? '轻量朗读 · 本机系统声音 · ' : next.demo ? '双人试听 · ' : '本机生成 · ') + next.lines.length + ' 段对白';
   id('player').hidden = false;
-  id('saveCard').hidden = next.demo;
+  id('saveCard').hidden = !!(next.demo || next.native);
   id('saveCard').disabled = false;
   id('saveNote').hidden = true;
   note(id('playerNote'),'点任意一句从这里听。');
@@ -248,15 +317,27 @@ function highlight(scroll) {
 function paintTransport() {
   if (!card) return;
   const count = card.lines.length;
-  const running = openingAudio || !audio.paused && !audio.ended;
+  const running = card.native ? reader.state === 'playing' : openingAudio || !audio.paused && !audio.ended;
   id('play').textContent = running ? 'Ⅱ 暂停' : endedAll ? '↻ 重听' : '▷ 播放';
   id('position').textContent = pad(active+1) + ' / ' + pad(count);
-  const elapsed = audio.currentSrc === card.urls[active] && Number.isFinite(audio.duration) && audio.duration > 0
+  const elapsed = card.native ? reader.fraction : audio.currentSrc === card.urls[active] && Number.isFinite(audio.duration) && audio.duration > 0
     ? Math.min(1,audio.currentTime / audio.duration) : 0;
   id('meter').firstElementChild.style.width = (endedAll ? 100 : 100*(active+elapsed)/count) + '%';
 }
 async function playLine(index, restart, scroll) {
-  if (!card?.urls[index]) return;
+  if (!card?.lines[index]) return;
+  if (card.native) {
+    active = index;
+    endedAll = false;
+    highlight(scroll);
+    const line = card.lines[index];
+    note(id('playerNote'),'系统声音正在本机朗读，可点击任意一句跳听。');
+    try {
+      reader.start({text:line.en, key:card.voices.get(line.speaker), rate:Number(id('rate').value),
+        update:paintTransport, end:advance, error:message => { note(id('playerNote'),message,true); paintTransport(); }});
+    } catch (e) { note(id('playerNote'),e.message,true); paintTransport(); }
+    return;
+  }
   const token = ++playbackVersion;
   active = index;
   endedAll = false;
@@ -276,14 +357,25 @@ async function playLine(index, restart, scroll) {
 }
 id('play').onclick = () => {
   if (!card) return;
+  if (card.native) {
+    try {
+      if (reader.state === 'playing') reader.pause();
+      else if (reader.state === 'paused') reader.resume(Number(id('rate').value));
+      else playLine(endedAll ? 0 : active,true,false);
+    } catch (e) { reader.stop(); note(id('playerNote'),e.message,true); paintTransport(); }
+    return;
+  }
   if (openingAudio || !audio.paused && !audio.ended) {
     playbackVersion++; openingAudio = false; audio.pause(); paintTransport();
   } else playLine(endedAll ? 0 : active,endedAll,false);
 };
-audio.addEventListener('ended',() => {
-  if (!card || audio.currentSrc !== card.urls[active] || !audio.ended) return;
+function advance() {
+  if (!card) return;
   if (active + 1 < card.lines.length) playLine(active+1,true,true);
   else { endedAll = true; paintTransport(); }
+}
+audio.addEventListener('ended',() => {
+  if (card && !card.native && audio.currentSrc === card.urls[active] && audio.ended) advance();
 });
 for (const event of ['play','pause','timeupdate','loadedmetadata']) audio.addEventListener(event,paintTransport);
 audio.addEventListener('error',() => {
@@ -293,11 +385,15 @@ audio.addEventListener('error',() => {
     paintTransport();
   }
 });
-id('rate').onchange = () => { audio.playbackRate = Number(id('rate').value); };
+id('rate').onchange = () => {
+  const rate = Number(id('rate').value);
+  if (!card?.native) { audio.playbackRate = rate; return; }
+  try { reader.changeRate(rate); } catch (e) { reader.stop(); note(id('playerNote'),e.message,true); paintTransport(); }
+};
 id('showChinese').onchange = () => id('lines').classList.toggle('hide-zh',!id('showChinese').checked);
-id('follow').onchange = () => { if (id('follow').checked && !audio.paused) highlight(true); };
+id('follow').onchange = () => { if (id('follow').checked && (reader.state === 'playing' || !audio.paused)) highlight(true); };
 id('saveCard').onclick = async () => {
-  if (!card || card.demo || saving) return;
+  if (!card || card.demo || card.native || saving) return;
   const target = card, version = cardVersion;
   saving = true;
   id('saveCard').disabled = true;
@@ -316,6 +412,7 @@ id('saveCard').onclick = async () => {
 };
 window.addEventListener('pagehide', event => {
   cancelJob();
+  reader.stop();
   playbackVersion++;
   openingAudio = false;
   audio.pause();
