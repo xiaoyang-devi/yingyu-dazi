@@ -1,6 +1,6 @@
-import {modelFileProgress} from './model-progress.js?v=6'
-import {createBestEffortCache} from './best-effort-cache.js?v=6'
-import {fetchSiteAsset} from './site-asset.js?v=6'
+import {modelFileProgress} from './model-progress.js?v=7'
+import {createBestEffortCache} from './best-effort-cache.js?v=7'
+import {fetchSiteAsset} from './site-asset.js?v=7'
 // The worker permits only static model assets, with no request body, query or transcript in the URL.
 const runtime = new URL('./assets/mt-runtime/',import.meta.url).href
 const modelRoot = new URL('./assets/mt-model/',import.meta.url).href
@@ -9,6 +9,11 @@ const base = 'https://huggingface.co/' + model + '/resolve/' + revision + '/'
 const sizes = { 'config.json':1389, 'tokenizer_config.json':282, 'generation_config.json':293,
   'tokenizer.json':6381339, 'onnx/encoder_model_quantized.onnx':52899742, 'onnx/decoder_model_merged_quantized.onnx':60212804 }
 const runtimeSizes = {'ort-wasm-simd.wasm':10014674,'ort-wasm.wasm':9223228}
+const storedInBlocks = new Set()
+const skipWrite = key => {
+  const url = typeof key === 'string' ? key : key.url || String(key)
+  return [...storedInBlocks].some(file => url.endsWith('/' + file))
+}
 let bypassCache = false
 const progress = modelFileProgress(sizes, '翻译', detail => self.postMessage({type:'progress', ...detail}))
 let assetProblem = ''
@@ -59,7 +64,7 @@ function useModelCache(env) {
   env.useCustomCache = true
   env.customCache = createBestEffortCache({
     name:'transformers-cache', bypassReads:bypassCache,
-    normalizeHit:sizedModelResponse,
+    normalizeHit:sizedModelResponse, skipWrite,
     onBypass:() => progress.prepare('已跳过暂不可用的设备缓存，正在从本站读取翻译文件…')
   })
 }
@@ -79,7 +84,12 @@ self.fetch = async (input, options = {}) => {
     const result = await fetchSiteAsset(modelFile ? modelRoot + modelFile : url, {
       fetcher:realFetch, bytes:sizes[modelFile] || runtimeSizes[runtimeFile], method,
       fresh:bypassCache, signal:options.signal || input.signal,
-      onRetry:attempt => progress.networkRetry(attempt)
+      onCheckpoint:event => {
+      const name = modelFile || runtimeFile
+      if (event.kind === 'complete') storedInBlocks.add(name)
+      progress.checkpoint(name,event)
+    },
+    onRetry:attempt => progress.networkRetry(attempt)
     })
     if (!result.ok) assetProblem = 'network'
     return result

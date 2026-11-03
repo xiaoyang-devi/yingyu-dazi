@@ -1,8 +1,16 @@
+import {checkpointAsset,checkpointResponse} from './asset-checkpoints.js?v=1';
+
 // Load immutable same-site files. The deadline covers only an outstanding network
 // read, never time spent compiling WASM or using the model.
-export async function fetchSiteAsset(url, {fetcher, bytes, signal, onRetry, idleMs = 25000, method = 'GET', fresh = false}) {
+export async function fetchSiteAsset(url, options) {
+  const plan = options.method === 'HEAD' ? null : checkpointAsset(url,options.bytes);
+  if (!plan) return fetchNetwork(url,options);
+  return checkpointResponse(url,options,plan,(offset,signal) => fetchNetwork(url,{...options,signal},offset));
+}
+
+async function fetchNetwork(url, {fetcher, bytes, signal, onRetry, idleMs = 25000, method = 'GET', fresh = false}, offset = 0) {
   const maxRetries = 2;
-  let received = 0, skip = 0, retries = 0, connection, reader;
+  let received = offset, skip = 0, retries = 0, connection, reader;
   const abort = () => connection?.abort();
   signal?.throwIfAborted?.();
   signal?.addEventListener('abort',abort,{once:true});
@@ -53,7 +61,7 @@ export async function fetchSiteAsset(url, {fetcher, bytes, signal, onRetry, idle
   headers.delete('content-encoding');
   headers.delete('transfer-encoding');
   headers.delete('content-range');
-  if (bytes) headers.set('content-length',String(bytes)); else headers.delete('content-length');
+  if (bytes) headers.set('content-length',String(bytes-offset)); else headers.delete('content-length');
   let closed = false;
   const body = new ReadableStream({
     async pull(controller) {

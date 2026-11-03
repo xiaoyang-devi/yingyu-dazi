@@ -3,6 +3,16 @@
 // Count actual bytes read per model file; use sizes from the immutable model revision.
 export function modelFileProgress(sizes, label, emit) {
   const fetched = new Set(), loaded = new Map(), done = new Set()
+  const checkpoints = new Map()
+  let checkpointUnavailable = false, tick = 0
+  function totals() {
+    let checkpointBytes = 0, resumedBytes = 0
+    for (const file of checkpoints.values()) {
+      resumedBytes += file.reused
+      checkpointBytes += file.saved + file.reused
+    }
+    return {checkpointBytes,resumedBytes,checkpointUnavailable}
+  }
   const expected = Object.entries(sizes)
   const allBytes = expected.reduce((sum, [, size]) => sum + size, 0)
   let knownTotal = expected.every(([, size]) => Number.isSafeInteger(size) && size >= 0)
@@ -10,6 +20,21 @@ export function modelFileProgress(sizes, label, emit) {
   const owns = file => Object.hasOwn(sizes, file)
   function prepare(message) { emit({stage:'load', phase:'prepare', message}) }
   return {
+    checkpoint(file,{kind,bytes}) {
+      if (!Number.isSafeInteger(bytes) || bytes < 0) return
+      if (kind === 'unavailable') checkpointUnavailable = true
+      else if (kind === 'reused' || kind === 'saved') {
+        const item = checkpoints.get(file) || {reused:0,saved:0}
+        item[kind] = bytes
+        checkpoints.set(file,item)
+      }
+      const now = Date.now()
+      if (now - tick < 250 && kind !== 'complete' && kind !== 'unavailable') return
+      tick = now
+      if (reportedReady && owns(file)) return
+      const state = owns(file) ? lastBytes : null
+      emit({...{stage:'load', phase:'prepare', message:'正在读取'+label+'文件…'},...state,...totals()})
+    },
     request(file) {
       if (!owns(file)) return
       if (!fetched.size && !lastBytes) emit({stage:'load', phase:'connect', message:'正在连接本站，等待'+label+'模型的第一批数据…'})
@@ -40,7 +65,7 @@ export function modelFileProgress(sizes, label, emit) {
       }
       if (read > 0) {
         const cached = fetched.size === 0
-        const detail = {stage:'load', phase:cached?'cache':'download', unit:'bytes', loaded:read, cachedBytes, cached,
+        const detail = {...totals(), stage:'load', phase:cached?'cache':'download', unit:'bytes', loaded:read, cachedBytes, cached,
           message:cached ? '正在从本机缓存读取'+label+'模型文件' : '正在读取本站的'+label+'模型文件'}
         if (knownTotal && Number.isSafeInteger(allBytes) && allBytes > 0) {
           detail.total = allBytes

@@ -1,7 +1,10 @@
 import {parseText} from './intake.js?v=4';
-import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=6';
-import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=6';
+import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=7';
+import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=7';
 import {localEnglishVoices, createLocalReader} from './native-speech.js';
+
+import {savePracticeCard, updatePracticePosition} from './library.js?v=7';
+import {practiceShelf} from './library-view.js?v=7';
 
 const id = key => document.getElementById(key);
 const source = id('source'), audio = id('audio');
@@ -30,7 +33,38 @@ function note(node, message, error = false) {
 }
 // A missing worker event is ambiguous on a phone: the engine might still be
 // compiling or the page may have been suspended. Warn without killing work.
-let waitTimer;
+let waitTimer, jobKind = '', wakeLock, wakeRequest = 0;
+let progressFileGroup = '';
+function foregroundMessage(returned = false) {
+  const message = document.hidden ? '页面已进入后台。iPhone 可能暂停下载，回到本页后再继续。'
+    : returned ? '已回到前台。等待浏览器恢复下载，已保存的完整分块可在重试时复用。'
+    : 'iPhone 切到后台或锁屏时，下载可能暂停。请尽量保持本页在前台。';
+  id('foregroundNote').textContent = message + (wakeLock && !wakeLock.released ? ' 已请求保持亮屏。' : '');
+}
+async function syncWakeLock() {
+  const ticket = ++wakeRequest;
+  if (!working || !id('stayAwake').checked || document.hidden || !navigator.wakeLock) {
+    const old = wakeLock;
+    wakeLock = null;
+    if (old) await old.release().catch(() => {});
+    return;
+  }
+  if (wakeLock && !wakeLock.released) return;
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    if (ticket !== wakeRequest) {await lock.release();return;}
+    wakeLock = lock;
+    foregroundMessage();
+    lock.addEventListener('release',() => {if (wakeLock === lock) {wakeLock = null;foregroundMessage();}});
+  } catch { if (working && !document.hidden) id('foregroundNote').textContent += ' 浏览器暂未允许保持亮屏。'; }
+}
+id('stayAwake').disabled = !navigator.wakeLock;
+if (!navigator.wakeLock) id('stayAwake').parentElement.append('（当前浏览器不支持）');
+id('stayAwake').onchange = () => {foregroundMessage();syncWakeLock();};
+document.addEventListener('visibilitychange',() => {
+  if (working) foregroundMessage(!document.hidden);
+  syncWakeLock();
+});
 function clearWaitHint() {
   clearTimeout(waitTimer);
   id('jobWait').hidden = true;
@@ -42,8 +76,8 @@ function watchVisibleWork() {
   waitTimer = setTimeout(() => {
     if (!working || document.hidden || panel.hidden) return;
     const hint = navigator.onLine === false && ['translation-model','voice-model'].includes(panel.dataset.stage)
-      ? '设备显示离线。首次使用需联网下载模型；恢复网络后，可继续等或重新尝试。'
-      : '这一步暂时没有新进度，网页仍在等待。可留在本页继续等；若一直不动，点「重新尝试」可跳过本机缓存。';
+      ? '设备显示离线。首次使用需联网下载模型。恢复网络后可重试。'
+      : '这一步暂时没有新进度，网页仍在等待。可在本页稍等。若一直不动，点「重新尝试」可从已保存的分块继续。';
     id('waitHint').textContent = hint;
     id('jobWait').hidden = false;
   }, 45000);
@@ -54,6 +88,8 @@ function resetJobProgress() {
   clearWaitHint();
   const panel = id('jobProgress');
   panel.hidden = true;
+  id('checkpointNote').hidden = true;
+  progressFileGroup = '';
   delete panel.dataset.stage;
   delete panel.dataset.phase;
   delete panel.dataset.indeterminate;
@@ -73,6 +109,9 @@ function showJob(stage,phase,title,message,measure = {}) {
   panel.dataset.stage = stage;
   panel.dataset.phase = phase;
   watchVisibleWork();
+  id('jobLabel').textContent = stage.endsWith('-model') ? '模型准备 · 本阶段进度' : jobKind === 'pack' ? '提前准备' : '听力卡制作进度';
+  id('foregroundNote').hidden = stage === 'complete';
+  if (stage === 'complete') id('checkpointNote').hidden = true;
   id('jobStage').textContent = title;
   const {loaded,total,unit} = measure;
   const hasLoaded = Number.isFinite(loaded) && loaded >= 0;
@@ -105,6 +144,18 @@ function showJob(stage,phase,title,message,measure = {}) {
   }
 }
 function showModel(stage,info) {
+  if (progressFileGroup !== stage) {
+    progressFileGroup = stage;
+    id('checkpointNote').hidden = true;
+  }
+  if (info.checkpointBytes || info.resumedBytes || info.checkpointUnavailable) {
+    const parts = [];
+    if (info.resumedBytes) parts.push('从上次断点读取 ' + megabytes(info.resumedBytes));
+    if (info.checkpointBytes) parts.push('已在本机保存 ' + megabytes(info.checkpointBytes) + ' 完整分块');
+    if (info.checkpointUnavailable) parts.push('部分文件暂时无法保存断点，请保持本页打开');
+    id('checkpointNote').textContent = parts.join(' · ');
+    id('checkpointNote').hidden = false;
+  }
   const model = stage === 'voice-model' ? '配音模型' : '翻译模型';
   const phase = info.cached ? 'cache' : info.phase || 'prepare';
   const verb = phase === 'cache' ? '读取缓存中的' : phase === 'download' ? '下载或读取' : phase === 'connect' ? '正在连接本站 · ' : phase === 'retry' ? '正在重连 · ' : '准备';
@@ -188,6 +239,8 @@ function changeEngine() {
     : kokoroNote;
   id('generate').textContent = native ? '▷ 准备轻量朗读' : '▷ 生成英语听力卡';
   resetJobProgress();
+  id('packStatus').textContent = '';
+  delete id('packStatus').dataset.ready;
   refreshVoices(true);
   scan();
 }
@@ -275,7 +328,7 @@ function scan() {
 function setReading(value) {
   readingFile = value;
   id('cancelFile').hidden = !value;
-  id('generate').disabled = working || value;
+  id('generate').disabled = id('preparePack').disabled = working || value;
 }
 function cancelImport() {
   importTicket++;
@@ -351,7 +404,10 @@ function setBusy(value) {
   working = value;
   if (!value) clearWaitHint();
   source.readOnly = value;
-  id('generate').disabled = value || readingFile;
+  id('generate').disabled = id('preparePack').disabled = value || readingFile;
+  id('libraryTab').disabled = value;
+  if (value) foregroundMessage();
+  syncWakeLock();
   id('engine').disabled = id('chatFile').disabled = id('rangeFrom').disabled = id('rangeTo').disabled = value;
   if (value) id('nextRange').disabled = id('prevRange').disabled = true;
   else scan();
@@ -367,13 +423,15 @@ function cancelJob() {
   cancelLocalTranslation();
   releaseLocalVoice();
   setBusy(false);
+  if (jobKind === 'pack') note(id('packStatus'),'准备已取消。下次可复用已保存的模型分块。');
   note(id('progress'),'已取消。原文和所选范围都保留在本页，可以重新生成。');
 }
 id('cancel').onclick = cancelJob;
 id('retryJob').onclick = () => {
   if (!working) return;
   cancelJob();
-  startGeneration(true);
+  if (jobKind === 'pack') preparePack(true);
+  else startGeneration(true);
 };
 
 async function makeLines(messages, tell, bypassCache) {
@@ -404,6 +462,7 @@ async function startGeneration(bypassCache) {
   const token = ++jobVersion, input = parsed.messages, voices = new Map(choices()), original = source.value, selection = id('rangeFrom').value + '-' + id('rangeTo').value;
   const live = () => token === jobVersion;
   demoVersion++;
+  jobKind = 'card';
   setBusy(true);
   showJob('prepare','prepare','准备制作','正在检查所选消息、角色与英语台词。');
   try {
@@ -508,12 +567,20 @@ function openCard(next) {
   clearAudio();
   cardVersion++;
   saving = false;
-  active = 0;
+  active = Number.isInteger(next.resumeIndex) && next.resumeIndex >= 0 && next.resumeIndex < next.lines.length ? next.resumeIndex : 0;
   endedAll = false;
+  id('repeatLine').checked = false;
   card = {...next,urls:next.native ? [] : next.lines.map(line => line.blob ? URL.createObjectURL(line.blob) : line.audio)};
   id('cardTitle').textContent = next.title;
   id('cardMeta').textContent = (next.native ? '轻量朗读 · 本机系统声音 · ' : next.demo ? '双人试听 · ' : '本机生成 · ') + next.lines.length + ' 段对白';
   id('player').hidden = false;
+  id('cardActions').hidden = !!next.demo;
+  id('practiceTitle').value = next.title;
+  id('practiceTitle').readOnly = !!next.libraryId;
+  id('savePractice').disabled = !!next.libraryId;
+  id('savePractice').textContent = next.libraryId ? '已存入我的练习' : '存入我的练习';
+  note(id('librarySaveNote'),'');
+  card.lastPosition = active;
   id('saveCard').hidden = !!(next.demo || next.native);
   id('saveCard').disabled = false;
   id('saveNote').hidden = true;
@@ -539,6 +606,13 @@ function openCard(next) {
 }
 function highlight(scroll) {
   if (!card) return;
+  if (card.libraryId && active !== card.lastPosition) {
+    const target = card;
+    target.lastPosition = active;
+    updatePracticePosition(target.libraryId,active).catch(() => {
+      if (card === target) note(id('librarySaveNote'),'这次的播放位置未能保存。',true);
+    });
+  }
   const rows = id('lines').children;
   for (let i=0;i<rows.length;i++) {
     rows[i].classList.toggle('active',i === active);
@@ -558,6 +632,8 @@ function paintTransport() {
   const count = card.lines.length;
   const running = card.native ? reader.state === 'playing' : openingAudio || !audio.paused && !audio.ended;
   id('play').textContent = running ? 'Ⅱ 暂停' : endedAll ? '↻ 重听' : '▷ 播放';
+  id('prevLine').disabled = active === 0;
+  id('nextLine').disabled = active === count-1;
   id('position').textContent = pad(active+1) + ' / ' + pad(count);
   const elapsed = card.native ? reader.fraction : audio.currentSrc === card.urls[active] && Number.isFinite(audio.duration) && audio.duration > 0
     ? Math.min(1,audio.currentTime / audio.duration) : 0;
@@ -610,7 +686,8 @@ id('play').onclick = () => {
 };
 function advance() {
   if (!card) return;
-  if (active + 1 < card.lines.length) playLine(active+1,true,true);
+  if (id('repeatLine').checked) playLine(active,true,false);
+  else if (active + 1 < card.lines.length) playLine(active+1,true,true);
   else { endedAll = true; paintTransport(); }
 }
 audio.addEventListener('ended',() => {
@@ -649,6 +726,66 @@ id('saveCard').onclick = async () => {
     if (version === cardVersion) { saving = false; id('saveCard').disabled = false; }
   }
 };
+id('prevLine').onclick = () => playLine(active-1,true,true);
+id('nextLine').onclick = () => playLine(active+1,true,true);
+
+id('savePractice').onclick = async () => {
+  if (!card || card.demo || card.libraryId || id('savePractice').disabled) return;
+  const target = card;
+  target.title = id('practiceTitle').value.trim() || id('cardTitle').textContent;
+  id('practiceTitle').value = id('cardTitle').textContent = target.title;
+  id('practiceTitle').readOnly = id('savePractice').disabled = true;
+  note(id('librarySaveNote'),'正在保存到这台设备…');
+  try {
+    const entry = await savePracticeCard(target);
+    target.libraryId = entry.id;
+    if (card === target) {
+      target.lastPosition = -1;
+      highlight(false);
+      id('savePractice').textContent = '已存入我的练习';
+      note(id('librarySaveNote'),'已保存。下次打开「我的练习」即可接着听。');
+    }
+    if (!id('libraryView').hidden) shelf.refresh();
+  } catch (error) {
+    if (card === target) {
+      note(id('librarySaveNote'),error.message,true);
+      id('practiceTitle').readOnly = id('savePractice').disabled = false;
+    }
+  }
+};
+
+const shelf = practiceShelf({
+  onOpen(saved) {showStudio(); openCard(saved);showPlayer();id('cardTitle').focus({preventScroll:true});},
+  onDelete(deleted) {
+    if (card?.libraryId !== deleted) return;
+    delete card.libraryId;
+    id('practiceTitle').readOnly = id('savePractice').disabled = false;
+    id('savePractice').textContent = '存入我的练习';
+    note(id('librarySaveNote'),'此卡已从练习库移除。');
+  }
+});
+function showStudio() {
+  shelf.leave();
+  id('studioView').hidden = false;
+  id('libraryView').hidden = true;
+  id('studioTab').setAttribute('aria-current','page');
+  id('libraryTab').removeAttribute('aria-current');
+}
+id('studioTab').onclick = id('returnStudio').onclick = () => {showStudio();window.scrollTo(0,0);};
+document.querySelector('.brand').onclick = () => showStudio();
+id('libraryTab').onclick = () => {
+  if (working) return;
+  demoVersion++;
+  playbackVersion++;
+  openingAudio = false;
+  audio.pause(); reader.stop(); paintTransport();
+  id('studioView').hidden = true;
+  id('libraryView').hidden = false;
+  id('libraryTab').setAttribute('aria-current','page');
+  id('studioTab').removeAttribute('aria-current');
+  window.scrollTo(0,0);
+  shelf.refresh();
+};
 window.addEventListener('pagehide', event => {
   cancelImport();
   cancelJob();
@@ -659,3 +796,60 @@ window.addEventListener('pagehide', event => {
   if (!event.persisted) { clearAudio(); card = null; }
 });
 scan();
+
+id('preparePack').onclick = () => preparePack(false);
+async function preparePack(bypassCache) {
+  if (working || readingFile) return;
+  const native = nativeMode(), token = ++jobVersion;
+  const live = () => jobVersion === token;
+  jobKind = 'pack';
+  resetJobProgress();
+  delete id('packStatus').dataset.ready;
+  note(id('packStatus'),'正在用示例检查本机模型…');
+  setBusy(true);
+  try {
+    await translateLocally([{speaker:'试音',text:'你好。'}],info => {
+      if (live()) showTranslation(info);
+    },{bypassCache});
+    if (!live()) return;
+    if (!native) {
+      for (const voice of ['af_heart','am_michael']) {
+        await renderLocalVoice('Hi.',voice,(message,detail) => {
+          if (!live()) return;
+          if (detail?.stage === 'load') showModel('voice-model',detail);
+          else showJob('check','synthesize','检查配音',voice === 'af_heart' ? '正在测试 Heart 女声。' : '正在测试 Michael 男声。');
+        },{bypassCache});
+        if (!live()) return;
+      }
+    }
+    const result = native ? '翻译模型检查完成。可以导入中文聊天了。' : '翻译和双人配音均已试运行。可以导入聊天了。';
+    note(id('packStatus'),result);
+    id('packStatus').dataset.ready = 'true';
+    showJob('complete','complete','准备完成',result,{unit:'complete',loaded:1,total:1});
+  } catch (error) {
+    if (live()) {resetJobProgress();note(id('packStatus'),'准备未完成。' + error.message,true);}
+  } finally {if (live()) {releaseLocalVoice();setBusy(false);}}
+}
+if ('serviceWorker' in navigator) window.addEventListener('load',() => {
+  navigator.serviceWorker.register(new URL('./study-sw.js',siteBase)).catch(() => {});
+});
+
+for (const [button,panel] of [['formatHelp','formatGuide'],['installHelp','installTip']]) {
+  id(button).onclick = () => {
+    const expanded = id(panel).hidden;
+    id(panel).hidden = !expanded;
+    id(button).setAttribute('aria-expanded',String(expanded));
+  };
+}
+id('shareSite').onclick = async () => {
+  const link = siteBase.href;
+  try {
+    if (navigator.share) await navigator.share({title:'英语搭子',url:link});
+    else {
+      await navigator.clipboard.writeText(link);
+      note(id('shareStatus'),'已复制网站链接。');
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') note(id('shareStatus'),'网站链接为 ' + link);
+  }
+};

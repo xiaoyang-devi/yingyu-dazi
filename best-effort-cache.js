@@ -5,6 +5,7 @@ export function createBestEffortCache({
   open = cacheName => globalThis.caches.open(cacheName),
   bypassReads = false,
   normalizeHit,
+  skipWrite,
   onBypass,
   openTimeoutMs = 3500,
   readTimeoutMs = 2500,
@@ -60,7 +61,7 @@ export function createBestEffortCache({
       }
     },
     async put(key, response) {
-      if (unavailable) return;
+      if (unavailable || skipWrite?.(key)) return;
       const cache = await getCache();
       if (cache) await bounded('put',writeTimeoutMs,() => cache.put(key,response),undefined);
     },

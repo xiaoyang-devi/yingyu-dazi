@@ -1,6 +1,6 @@
-import {modelFileProgress} from './model-progress.js?v=6';
-import {createBestEffortCache} from './best-effort-cache.js?v=6';
-import {fetchSiteAsset} from './site-asset.js?v=6';
+import {modelFileProgress} from './model-progress.js?v=7';
+import {createBestEffortCache} from './best-effort-cache.js?v=7';
+import {fetchSiteAsset} from './site-asset.js?v=7';
 // Pinned browser bundle from the Kokoro authors. The phonemizer and tokenizer run here.
 const PACKAGE = new URL("./assets/voice-runtime/kokoro.web.js",import.meta.url).href;
 const WASM = new URL("./assets/voice-runtime/",import.meta.url).href;
@@ -39,6 +39,11 @@ const modelFiles = new Set([
   ...Array.from(voiceFiles,voice => "voices/"+voice+".bin")
 ]);
 const runtimeSizes = {"ort-wasm-simd-threaded.jsep.mjs":44484,"ort-wasm-simd-threaded.jsep.wasm":21596019};
+const storedInBlocks = new Set()
+const skipWrite = key => {
+  const url = typeof key === 'string' ? key : key.url || String(key)
+  return [...storedInBlocks].some(file => url.endsWith('/' + file))
+}
 let bypassCache = false;
 const coreSizes = {"config.json":44, "tokenizer_config.json":113, "tokenizer.json":3497, "onnx/model_quantized.onnx":92361116};
 let progress;
@@ -67,6 +72,11 @@ self.fetch = (input, options = {}) => {
   return fetchSiteAsset(modelFile ? modelRoot + modelFile : url.href, {
     fetcher:http, bytes, method,
     fresh:bypassCache, signal:options.signal || input.signal,
+    onCheckpoint:event => {
+      const name = modelFile || runtimeFile
+      if (event.kind === 'complete') storedInBlocks.add(name)
+      progress.checkpoint(name,event)
+    },
     onRetry:attempt => progress.networkRetry(attempt)
   });
 };
@@ -75,7 +85,7 @@ try {
   const adapters = new Map();
   self.caches.open = async name => {
     if (!adapters.has(name)) adapters.set(name,createBestEffortCache({
-      name:"yingyudazi-voice-"+REV+"-"+name, open, bypassReads:bypassCache,
+      name:"yingyudazi-voice-"+REV+"-"+name, open, bypassReads:bypassCache, skipWrite,
       onBypass:() => progress?.prepare("已跳过暂不可用的设备缓存，正在从本站读取配音文件…")
     }));
     return adapters.get(name);
