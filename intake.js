@@ -5,7 +5,7 @@ const DAY = /\d{4}(?:年\d{1,2}月\d{1,2}日|[-/]\d{1,2}[-/]\d{1,2})/u.source
 const TIME = /(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?/u.source
 const DATE = new RegExp('^'+DAY+'\\s+'+TIME+'$','u')
 const BARE_TIME = new RegExp('^(?:'+DAY+'\\s+)?'+TIME+'$','u')
-const STAMPED = new RegExp('^(.+?)\\s+(?:'+DAY+'\\s+)?'+TIME+'$','u')
+const STAMPED = new RegExp('^(.{1,128}?)\\s+(?:'+DAY+'\\s+)?'+TIME+'$','u')
 const URL_OR_CLOCK = /^(?:[a-z][\w+.-]*:\/\/|(?:mailto|tel|file|data|blob|sms|urn|about):|\/\/|www\.|(?:[\w-]+\.)+[a-z]{2,}(?:[:/]|$)|\d{1,2}:\d{2}(?:\D|$))/iu
 const MEDIA = /^\[(?:图片|视频|文件|动画表情|表情包|语音|语音通话|视频通话|位置|名片|小程序|链接)\](?:[ \t][^\n]*)?$/u
 const MEDIA_TYPES = new Set(['image', 'voice', 'video', 'file', 'location', 'link', 'business_card', 'miniprogram', 'emoji', 'channels_shop_product', 'channels_shop_order', 'finder'])
@@ -22,11 +22,11 @@ function parseMerged(value, add, skip, depth = 0) {
   const record = value.merged_msg ?? value
   if (!Array.isArray(record?.item) || !record.item.length) fail('合并记录缺少消息列表 item。')
   for (const item of record.item) {
-    if (!object(item)) fail('合并记录含有无效消息。')
+    if (!object(item)) fail('合并记录含有无效消息，请改为粘贴带昵称的文字。')
     if (MEDIA_TYPES.has(item.msgtype)) { skip(); continue }
-    if (item.msgtype !== 'text' && item.msgtype !== 'merged_msg') fail('记录中含有无法识别的消息类型，请使用文字导出。')
+    if (item.msgtype !== 'text' && item.msgtype !== 'merged_msg') fail('有无法识别的消息类型，请粘贴需要的文字并保留昵称。')
     const payload = typeof item.msg_content === 'string'
-      ? parseJSON(item.msg_content, '合并消息内容损坏，请重新导出。') : item.msg_content
+      ? parseJSON(item.msg_content, '合并消息内容不完整，请粘贴带昵称的文字。') : item.msg_content
     if (!object(payload) || (payload.msgtype != null && payload.msgtype !== item.msgtype)) fail('合并消息正文与标注的类型不一致。')
     if (item.msgtype === 'merged_msg') parseMerged(payload, add, skip, depth + 1)
     else add(item.sender_name, payload.text?.content, false)
