@@ -1,6 +1,7 @@
 import {parseText} from './intake.js?v=4';
-import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=7';
+import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=8';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=7';
+import {planOnline, translateOnline} from './online-translate.js?v=8';
 import {localEnglishVoices, createLocalReader} from './native-speech.js';
 
 import {savePracticeCard, updatePracticePosition} from './library.js?v=7';
@@ -18,11 +19,46 @@ const speakerNames = messages => [...new Set(messages.map(m => m.speaker))];
 const pad = n => String(n).padStart(2,'0');
 const han = /\p{Script=Han}/u;
 const reader = createLocalReader();
-const nativeMode = () => id('engine').value === 'native';
+const onlineMode = () => id('engine').value === 'online';
+const nativeMode = () => id('engine').value !== 'kokoro';
 const castChoices = {kokoro:new Map(),native:new Map()};
-const choices = () => castChoices[id('engine').value];
+const choices = () => nativeMode() ? castChoices.native : castChoices.kokoro;
 const kokoroNote = id('downloadNote').textContent;
 let systemVoices = [], cachedTranslation = null;
+let onlinePlan = null, onlineIssue = '', onlineRequest = null, consentSignature = '';
+function revokeConsent() {
+  id('onlineConsent').checked = false;
+  consentSignature = '';
+}
+function previewOnline() {
+  const list = id('sendLines');
+  list.replaceChildren();
+  if (!id('sendPreview').open || !onlinePlan) return;
+  for (const line of onlinePlan.segments) {
+    const item = document.createElement('li');
+    item.textContent = line;
+    list.append(item);
+  }
+}
+function updateOnlinePlan() {
+  onlinePlan = null;
+  onlineIssue = '';
+  if (onlineMode() && parsed) {
+    try {onlinePlan = planOnline(parsed.messages);} catch (error) {onlineIssue = error.message;}
+  }
+  const needed = Boolean(onlinePlan?.count);
+  id('onlineTerms').hidden = !needed;
+  if (!needed || (consentSignature && consentSignature !== JSON.stringify(onlinePlan.segments))) revokeConsent();
+  if (needed) id('onlineScope').textContent = '本次将发送 ' + onlinePlan.count + ' 段中文或中英混合正文，共 ' + onlinePlan.characters + ' 字符';
+  if (onlineMode()) id('quickIntro').textContent = onlineIssue || (onlinePlan && !needed
+    ? '这段聊天可直接用本机英语声音朗读，无需联网翻译。'
+    : '免下载网站模型。由 MyMemory 翻译所选中文，再用本机英语声音朗读。');
+  previewOnline();
+}
+id('sendPreview').ontoggle = previewOnline;
+id('onlineConsent').onchange = () => {
+  consentSignature = id('onlineConsent').checked && onlinePlan ? JSON.stringify(onlinePlan.segments) : '';
+};
 let parsed = null, parseIssue = '', castNames = [], jobVersion = 0, working = false;
 let card = null, active = 0, playbackVersion = 0, openingAudio = false, endedAll = false;
 let cardVersion = 0, demoVersion = 0, saving = false;
@@ -43,7 +79,7 @@ function foregroundMessage(returned = false) {
 }
 async function syncWakeLock() {
   const ticket = ++wakeRequest;
-  if (!working || !id('stayAwake').checked || document.hidden || !navigator.wakeLock) {
+  if (!working || onlineMode() || !id('stayAwake').checked || document.hidden || !navigator.wakeLock) {
     const old = wakeLock;
     wakeLock = null;
     if (old) await old.release().catch(() => {});
@@ -72,7 +108,7 @@ function clearWaitHint() {
 function watchVisibleWork() {
   clearWaitHint();
   const panel = id('jobProgress');
-  if (!working || document.hidden || panel.hidden || panel.dataset.stage === 'complete') return;
+  if (!working || onlineMode() || document.hidden || panel.hidden || panel.dataset.stage === 'complete') return;
   waitTimer = setTimeout(() => {
     if (!working || document.hidden || panel.hidden) return;
     const hint = navigator.onLine === false && ['translation-model','voice-model'].includes(panel.dataset.stage)
@@ -110,7 +146,8 @@ function showJob(stage,phase,title,message,measure = {}) {
   panel.dataset.phase = phase;
   watchVisibleWork();
   id('jobLabel').textContent = stage.endsWith('-model') ? '模型准备 · 本阶段进度' : jobKind === 'pack' ? '提前准备' : '听力卡制作进度';
-  id('foregroundNote').hidden = stage === 'complete';
+  id('foregroundNote').hidden = stage === 'complete' || onlineMode();
+  id('switchOnline').hidden = stage === 'complete' || onlineMode();
   if (stage === 'complete') id('checkpointNote').hidden = true;
   id('jobStage').textContent = title;
   const {loaded,total,unit} = measure;
@@ -231,13 +268,16 @@ function refreshVoices(force = false) {
 function changeEngine() {
   reader.stop();
   paintTransport();
-  const native = nativeMode();
+  const native = nativeMode(), online = onlineMode();
+  revokeConsent();
+  id('packPanel').hidden = online;
+  id('quickIntro').hidden = !online;
   id('nativeSupport').hidden = !native;
   id('downloadTitle').textContent = native ? '系统声音实时朗读 · 无需下载 Kokoro' : '首次生成约需下载 250 MB';
   id('downloadNote').textContent = native
     ? '仅使用设备已有的本地英语声音。纯英文可直接练习；中文首次仍需下载约 130 MB 的翻译模型。轻量模式不保存音频。'
     : kokoroNote;
-  id('generate').textContent = native ? '▷ 准备轻量朗读' : '▷ 生成英语听力卡';
+  id('generate').textContent = online ? '▷ 生成在线快读卡' : native ? '▷ 生成本机朗读卡' : '▷ 生成英语听力卡';
   resetJobProgress();
   id('packStatus').textContent = '';
   delete id('packStatus').dataset.ready;
@@ -268,6 +308,7 @@ function setRange(first,last) {
   id('rangeTo').value = last;
 }
 function resetSource(raw, known) {
+  revokeConsent();
   scannedText = raw;
   corpus = null;
   corpusError = '';
@@ -316,6 +357,7 @@ function scan() {
     }
     note(id('rangeNote'),parseIssue || '仅制作选中的 ' + count + ' 条文字，原文框保留整份记录。每次最多 60 条、6,000 个正文字。',!!parseIssue);
   }
+  updateOnlinePlan();
   id('characters').textContent = amount.toLocaleString('en-US') + ' / 6,000 正文字';
   const names = parsed ? speakerNames(parsed.messages) : [];
   buildRoles(names);
@@ -367,6 +409,7 @@ id('chatFile').onchange = async event => {
   }
 };
 function editedRange() {
+  revokeConsent();
   if (readingFile) {
     cancelImport();
     note(id('fileStatus'),'已取消导入，保留当前范围。');
@@ -402,6 +445,7 @@ source.addEventListener('blur', () => {
 
 function setBusy(value) {
   working = value;
+  id('onlineConsent').disabled = value;
   if (!value) clearWaitHint();
   source.readOnly = value;
   id('generate').disabled = id('preparePack').disabled = value || readingFile;
@@ -419,6 +463,8 @@ function setBusy(value) {
 function cancelJob() {
   if (!working) return;
   jobVersion++;
+  onlineRequest?.abort();
+  onlineRequest = null;
   resetJobProgress();
   cancelLocalTranslation();
   releaseLocalVoice();
@@ -427,6 +473,13 @@ function cancelJob() {
   note(id('progress'),'已取消。原文和所选范围都保留在本页，可以重新生成。');
 }
 id('cancel').onclick = cancelJob;
+id('switchOnline').onclick = () => {
+  if (onlineMode()) return;
+  cancelJob();
+  id('engine').value = 'online';
+  changeEngine();
+  if (onlinePlan?.count) id('onlineConsent').focus(); else source.focus();
+};
 id('retryJob').onclick = () => {
   if (!working) return;
   cancelJob();
@@ -450,12 +503,21 @@ async function startGeneration(bypassCache) {
     if (corpus && !id('range').hidden) { id('range').open = true; id('rangeFrom').focus(); } else source.focus();
     return;
   }
-  const native = nativeMode();
+  const native = nativeMode(), online = onlineMode();
+  if (online) {
+    if (onlineIssue) {note(id('progress'),onlineIssue,true);return;}
+    if (onlinePlan?.count && (!id('onlineConsent').checked || consentSignature !== JSON.stringify(onlinePlan.segments))) {
+      revokeConsent();
+      note(id('progress'),'请先查看本次要发送的正文并勾选同意，或改选纯本机模式。',true);
+      id('onlineConsent').focus();
+      return;
+    }
+  }
   if (native) {
     refreshVoices();
     if (!systemVoices.length) { note(id('progress'),'这台设备暂时没有可用的本地英语声音。请安装英语声音后再试，或选用 Kokoro。',true); return; }
   }
-  if ((!native || parsed.messages.some(m => han.test(m.text))) && (!globalThis.isSecureContext || !globalThis.Worker || !globalThis.WebAssembly)) {
+  if (!online && (!native || parsed.messages.some(m => han.test(m.text))) && (!globalThis.isSecureContext || !globalThis.Worker || !globalThis.WebAssembly)) {
     note(id('progress'),'本机生成需要通过 HTTPS 在新版 Safari 或 Chrome 中打开。',true);
     return;
   }
@@ -463,17 +525,28 @@ async function startGeneration(bypassCache) {
   const live = () => token === jobVersion;
   demoVersion++;
   jobKind = 'card';
+  if (online) {
+    onlineRequest = new AbortController();
+    revokeConsent();
+  }
   setBusy(true);
-  showJob('prepare','prepare','准备制作','正在检查所选消息、角色与英语台词。');
+  showJob('prepare','prepare',online ? '准备在线快读' : '准备制作','正在检查所选消息、角色与英语台词。');
   try {
-    const reuse = cachedTranslation?.original === original && cachedTranslation.selection === selection;
+    const reuse = !online && cachedTranslation?.original === original && cachedTranslation.selection === selection;
     if (reuse) {
       const count = cachedTranslation.lines.length;
       showJob('translate','cache','复用本次选区的译文','已完成的英文稿保存在本页。',{unit:'lines',loaded:count,total:count});
     }
-    const lines = reuse ? cachedTranslation.lines : await makeLines(input, info => { if (live()) showTranslation(info); },bypassCache);
+    let lines;
+    if (online) {
+      lines = await translateOnline(input,info => {
+        if (live()) showJob('online','translate','MyMemory 在线翻译',info.message,info);
+      },{signal:onlineRequest.signal});
+    } else {
+      lines = reuse ? cachedTranslation.lines : await makeLines(input, info => { if (live()) showTranslation(info); },bypassCache);
+    }
     if (!live()) return;
-    cachedTranslation = {original,selection,lines};
+    if (!online) cachedTranslation = {original,selection,lines};
     const people = speakerNames(input);
     const title = people.slice(0,2).join('、') + (people.length > 2 ? '等' : '') + '的对话';
     if (native) {
@@ -509,10 +582,10 @@ async function startGeneration(bypassCache) {
       const where = id('jobStage').textContent, metric = id('jobMetric').textContent;
       resetJobProgress();
       note(id('progress'),'生成未完成（' + where + (metric ? '，' + metric : '') + '）。' + (error.message || '请重试。') +
-        (voiceFailed ? ' 译文已保留在本页，可改选「轻量朗读」直接使用。' : ' 原文仍在，点生成可重试。'),true);
+        (online ? ' 原文已保留。重试时请再次确认发送。' : voiceFailed ? ' 译文已保留在本页，可改选「纯本机翻译 · 系统朗读」直接使用。' : ' 原文仍在，点生成可重试。'),true);
     }
   } finally {
-    if (live()) { releaseLocalVoice(); setBusy(false); }
+    if (live()) { onlineRequest = null; releaseLocalVoice(); setBusy(false); }
   }
 }
 
@@ -572,7 +645,7 @@ function openCard(next) {
   id('repeatLine').checked = false;
   card = {...next,urls:next.native ? [] : next.lines.map(line => line.blob ? URL.createObjectURL(line.blob) : line.audio)};
   id('cardTitle').textContent = next.title;
-  id('cardMeta').textContent = (next.native ? '轻量朗读 · 本机系统声音 · ' : next.demo ? '双人试听 · ' : '本机生成 · ') + next.lines.length + ' 段对白';
+  id('cardMeta').textContent = (next.native ? '本机系统声音 · ' : next.demo ? '双人试听 · ' : '本机生成 · ') + next.lines.length + ' 段对白';
   id('player').hidden = false;
   id('cardActions').hidden = !!next.demo;
   id('practiceTitle').value = next.title;
@@ -795,11 +868,11 @@ window.addEventListener('pagehide', event => {
   audio.pause();
   if (!event.persisted) { clearAudio(); card = null; }
 });
-scan();
+changeEngine();
 
 id('preparePack').onclick = () => preparePack(false);
 async function preparePack(bypassCache) {
-  if (working || readingFile) return;
+  if (onlineMode() || working || readingFile) return;
   const native = nativeMode(), token = ++jobVersion;
   const live = () => jobVersion === token;
   jobKind = 'pack';

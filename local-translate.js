@@ -5,7 +5,7 @@ let cancelCurrent
 export function cancelLocalTranslation() { cancelCurrent?.() }
 const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter('zh', {granularity:'sentence'}) : null
 
-function units(text) {
+export function units(text) {
   const result = []
   let prefix = ''
   function keep(part) {
