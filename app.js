@@ -1,6 +1,6 @@
 import {parseText} from './intake.js';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js';
-import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js';
+import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=3';
 import {localEnglishVoices, createLocalReader} from './native-speech.js';
 
 const id = key => document.getElementById(key);

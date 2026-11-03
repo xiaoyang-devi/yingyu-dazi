@@ -6,6 +6,29 @@ const REV = "1939ad2a8e416c0acfeecc08a694d14ef25f2231";
 const base = "https://huggingface.co/" + MODEL + "/resolve/";
 const voiceFiles = new Set(["af_heart","am_michael","bf_emma","af_bella","am_fenrir","bm_george","bf_isabella"]);
 
+// Kokoro's bundled eSpeak dictionary iterates a gzip stream during module startup.
+// Some WebKit workers support DecompressionStream but lack the stream iterator.
+if (typeof ReadableStream !== "undefined" && !ReadableStream.prototype[Symbol.asyncIterator]) {
+  Object.defineProperty(ReadableStream.prototype, Symbol.asyncIterator, {
+    configurable: true, writable: true,
+    async *value(options = {}) {
+      const reader = this.getReader();
+      let done = false;
+      try {
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) { done = true; return; }
+          yield chunk.value;
+        }
+      } finally {
+        try {
+          if (!done && !options.preventCancel) await reader.cancel();
+        } finally { reader.releaseLock(); }
+      }
+    }
+  });
+}
+
 // The published v1.2.1 bundle constructs HF /main/ URLs internally. Bind its fetch
 // and cache namespace to the immutable revision without modifying other app workers.
 const modelFiles = new Set([
