@@ -125,13 +125,14 @@ function resetSource(raw, known) {
     try { corpus = known || parseText(raw); } catch (e) { corpusError = e.message; }
   }
   const total = corpus?.messages.length || 0;
-  id('range').hidden = total < 2;
   if (corpus) {
     for (const message of corpus.messages) prefix.push(prefix.at(-1) + [...message.text].length);
     id('rangeFrom').max = id('rangeTo').max = total;
     setRange(1,suggestedEdge(1,1));
   }
-  id('range').open = total > maxMessages || prefix.at(-1) > maxCharacters;
+  const oversized = total > maxMessages || prefix.at(-1) > maxCharacters;
+  id('range').hidden = total < 2 && !oversized;
+  id('range').open = oversized;
   if (corpus) corpus.people = speakerNames(corpus.messages);
   id('materials').textContent = corpus
     ? corpus.people.length + ' 位发言人 · ' + total + ' 条文字' + (corpus.skipped ? ' · 已跳过 ' + corpus.skipped + ' 条' : '')
@@ -159,7 +160,7 @@ function scan() {
       amount = prefix[last]-prefix[first-1];
       if (count > maxMessages || amount > maxCharacters) {
         parseIssue = count === 1 ? '这一条正文超过 6,000 字。请在原文框中拆短，或选择其他消息。'
-          : '本次最多制作 60 条、6,000 个正文字。请缩短下面的消息范围。';
+          : '本次最多制作 60 条、6,000 个正文字。请缩短所选范围。';
       } else parsed = {messages:corpus.messages.slice(first-1,last),skipped:corpus.skipped};
     }
     note(id('rangeNote'),parseIssue || '仅制作选中的 ' + count + ' 条文字，原文框保留整份记录。每次最多 60 条、6,000 个正文字。',!!parseIssue);
@@ -206,7 +207,7 @@ id('chatFile').onchange = async event => {
     scan();
     note(id('progress'),'');
     note(id('fileStatus'),'已导入 ' + result.messages.length + ' 条文字、' + speakerNames(result.messages).length + ' 位发言人。' +
-      (id('range').open ? '记录较长，已选好第一段，可调整制作范围。' : '可在「角色与声音」中选声。'));
+      (parseIssue ? parseIssue : id('range').open ? '记录较长，已选好第一段，可调整制作范围。' : '可在「角色与声音」中选声。'));
   } catch (e) {
     if (ticket === importTicket) note(id('fileStatus'),'导入未完成。' + (e.message || '请重新选择 ZIP 或 TXT。'),true);
   } finally {
