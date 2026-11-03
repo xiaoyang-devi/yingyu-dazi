@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: https://api.mymemory.translated.net/get https://api.tts.ai/v1/ https://cdn.tts.ai; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: https://api.mymemory.translated.net/get https://api.tts.ai/v1/ https://cdn.tts.ai https://kinabraytan-kokoro-tts-server.hf.space/gradio_api/; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f5f3eb">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11,7 +11,7 @@
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./style.css?v=11">
-  <script type="module" src="./app.js?v=11"></script>
+  <script type="module" src="./app.js?v=12"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -51,6 +51,7 @@
       <div id="onlineTerms" class="online-terms" hidden>
         <strong id="onlineScope"></strong>
         <p id="onlineDisclosure">点击生成即同意本次发送。配音时会附上所选音色。昵称栏、时间栏和附件留在设备上，正文里提到的人名会随句发送。</p>
+        <div data-backup-control="allowBackup"></div>
         <details id="sendPreview"><summary>查看待翻译的原句</summary><ol id="sendLines"></ol></details>
         <details class="service-info"><summary>了解数据使用和免费额度</summary>
           <p>MyMemory 可能长期保存原句并交给翻译合作方处理。TTS.ai 暂存生成的录音，免费配音仅供个人非商业练习。</p>
@@ -79,6 +80,7 @@
       <details id="proofPanel" class="cloud-panel" hidden>
         <summary><span>校对英文<small id="proofHint">按上下文修改译文</small></span><span class="adjust">编辑</span></summary>
         <div class="cloud-body"><p class="small" id="proofDisclosure">可以按上下文修改英文。重新配音时，TTS.ai 会收到需要新录音的英文台词和对应音色。</p>
+          <div id="proofBackupSettings" data-backup-control="proofBackup"></div>
           <div id="proofRows"></div><button type="button" id="applyProof" class="plain" aria-describedby="proofDisclosure">同意并为修改的英文重新配音</button>
           <p id="proofNote" class="small" role="status"></p>
         </div>
@@ -90,7 +92,8 @@
           <div id="cloudCast"></div><button id="cloudSwap" class="plain" type="button">交换男女声</button>
           <details id="cloudPreview"><summary id="cloudScope">查看待发送的英文台词</summary><ol id="cloudLines"></ol></details>
           <p class="small">TTS.ai 会收到英文台词和所选音色，并暂存生成的录音。昵称栏、时间和附件留在设备上。台词里提到的人名会随句发送。免费声音仅供个人非商业练习。<a href="https://tts.ai/privacy/" target="_blank" rel="noopener noreferrer">隐私政策</a> · <a href="https://tts.ai/terms/" target="_blank" rel="noopener noreferrer">使用条款</a></p>
-          <label class="cloud-consent"><input id="cloudConsent" type="checkbox" autocomplete="off">同意本次把上列英文交给 TTS.ai 配音</label>
+          <div data-backup-control="legacyBackup"></div>
+          <label class="cloud-consent"><input id="cloudConsent" type="checkbox" autocomplete="off">同意按上方的服务设置发送本次英文台词</label>
           <div class="cloud-buttons"><button type="button" id="cloudGenerate" class="primary" disabled>生成自然配音</button><button type="button" id="cloudCancel" class="plain" hidden>停止配音</button></div>
           <p id="cloudStatus" class="small" role="status" aria-live="polite"></p>
         </div>
@@ -114,5 +117,9 @@
     </section>
     <footer><div class="footer-tools"><span>英语搭子 <b>／</b> <a href="./demo/CREDITS.txt">试听来源</a> · <a href="./assets/NOTICE.html">模型与许可</a></span><button type="button" id="shareSite" class="footer-link">分享网站</button><button type="button" id="installHelp" class="footer-link" aria-expanded="false" aria-controls="installTip">添加到 iPhone 主屏幕</button></div><p>在线制作时，每次点击生成才会发送所选台词。纯本机模式的翻译、配音和练习都留在设备上。</p><p id="installTip" hidden>在 iPhone 的 Safari 中打开本站，点分享菜单中的「添加到主屏幕」，再点「添加」。以后请从同一入口打开「我的练习」。</p><p id="shareStatus" role="status"></p></footer>
   </main>
+  <template id="backupChoice">
+    <label class="cloud-consent"><input type="checkbox" autocomplete="off">主服务额度用完时，允许切换到 Hugging Face 备用配音</label>
+    <p class="small" hidden>已开启自动接续。剩下的英文台词和音色可能发给社区维护的 <a href="https://huggingface.co/spaces/kinabraytan/kokoro-tts-server" target="_blank" rel="noopener noreferrer">Kokoro 服务</a>。女声换为 Bella，男声仍用 Michael。录音可通过服务生成的链接访问，保留时间未注明。此选择会记在当前浏览器。</p>
+  </template>
   <audio id="audio" preload="auto" playsinline></audio>
 </body></html>

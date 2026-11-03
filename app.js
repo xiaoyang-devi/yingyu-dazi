@@ -2,12 +2,12 @@ import {parseText} from './intake.js?v=4';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=8';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=7';
 import {planOnline, translateOnline, isReadableEnglish} from './online-translate.js?v=11';
-import {cloudPanel} from './cloud-panel.js?v=11';
-import {CLOUD_VOICES,renderCloudDialogue} from './cloud-voice.js?v=11';
+import {cloudPanel} from './cloud-panel.js?v=12';
+import {CLOUD_VOICES,renderCloudDialogue} from './cloud-voice.js?v=12';
 import {createLocalReader} from './native-speech.js';
 
-import {savePracticeCard, updatePracticePosition} from './library.js?v=11';
-import {practiceShelf} from './library-view.js?v=11';
+import {savePracticeCard, updatePracticePosition} from './library.js?v=12';
+import {practiceShelf} from './library-view.js?v=12';
 
 const id = key => document.getElementById(key);
 const source = id('source'), audio = id('audio');
@@ -26,7 +26,38 @@ const castChoices = {kokoro:new Map(),online:new Map()};
 const choices = () => onlineMode() ? castChoices.online : castChoices.kokoro;
 let cachedTranslation = null;
 let onlinePlan = null, onlineIssue = '', onlineRequest = null;
-let onlineCache = new Map(), onlineClips = new Map(), reviewLines = null;
+let onlineCache = new Map(), onlineClips = new Map(), onlineRoute = {}, reviewLines = null;
+const backupKey = 'yingyu-dazi:huggingface-backup:v1';
+let backupAllowed = false;
+try { backupAllowed = localStorage.getItem(backupKey) === 'yes'; } catch {}
+const backupControls = [...document.querySelectorAll('[data-backup-control]')];
+for (const container of backupControls) {
+  container.append(id('backupChoice').content.cloneNode(true));
+  const input = container.querySelector('input'), details = container.querySelector('p');
+  input.id = container.dataset.backupControl;
+  details.id = input.id + 'Details';
+  input.setAttribute('aria-describedby',details.id);
+  input.onchange = () => {
+    backupAllowed = input.checked;
+    try { localStorage.setItem(backupKey,backupAllowed ? 'yes' : 'no'); } catch {}
+    updateBackupControls();
+    updateOnlinePlan();
+    cloud.refresh();
+  };
+}
+function updateBackupControls() {
+  for (const container of backupControls) {
+    container.querySelector('input').checked = backupAllowed;
+    container.querySelector('p').hidden = !backupAllowed;
+  }
+  id('reviewDisclosure').textContent = '点击下方配音按钮，将已准备好的英文和音色交给 TTS.ai。' +
+    (backupAllowed ? '额度不足时，由已启用的 Hugging Face 社区服务接续。' : '') + '未补的句子会跳过。';
+}
+updateBackupControls();
+function serviceVoice(voice,provider) {
+  if (provider === 'huggingface') return '备用配音 · ' + (voice === 'af_heart' ? 'Bella 女声' : 'Michael 男声');
+  return voiceLabels[voice];
+}
 function clearReview() {
   reviewLines = null;
   id('translationReview').hidden = true;
@@ -36,6 +67,7 @@ function resetOnlineSelection() {
   clearReview();
   onlineCache = new Map();
   onlineClips = new Map();
+  onlineRoute = {};
 }
 function previewOnline() {
   const list = id('sendLines');
@@ -60,7 +92,8 @@ function updateOnlinePlan() {
     id('generate').setAttribute('aria-describedby','onlineScope onlineDisclosure');
     id('onlineScope').textContent = needed
       ? '将发送 ' + onlinePlan.count + ' 段正文（' + onlinePlan.characters + ' 字符）给 MyMemory 翻译，再将英文交给 TTS.ai 配音。'
-      : '本次仅将需要配音的英文交给 TTS.ai。';
+      : '本次直接将需要配音的英文交给 TTS.ai。';
+    if (backupAllowed) id('onlineScope').textContent += '用量受限时可由 Hugging Face 接续。';
     id('quickIntro').textContent = onlineIssue || '自动翻译并按角色配音。默认交替使用 Heart 女声和 Michael 男声，可在下方调整。';
     id('generate').textContent = reviewLines && needed ? '同意重试待译句并生成自然配音' : '同意并生成自然配音';
   }
@@ -427,6 +460,7 @@ source.addEventListener('blur', () => {
 
 function setBusy(value) {
   working = value;
+  for (const container of backupControls) container.querySelector('input').disabled = value;
   id('demo').disabled = id('applyProof').disabled = value;
   id('cloudPanel').inert = id('proofPanel').inert = value;
   for (const field of id('reviewRows').querySelectorAll('textarea')) field.disabled = value;
@@ -547,6 +581,7 @@ async function startGeneration(bypassCache,useReady = false) {
     return;
   }
   const token = ++jobVersion, input = parsed.messages, voices = new Map(choices()), original = source.value, selection = id('rangeFrom').value + '-' + id('rangeTo').value;
+  const allowBackup = online && backupAllowed;
   const live = () => token === jobVersion;
   cloud.cancel();
   demoVersion++;
@@ -580,11 +615,11 @@ async function startGeneration(bypassCache,useReady = false) {
     const partial = useReady && lines.length < reviewLines.length;
     const title = dialogueTitle(input) + (partial ? '（节选 ' + lines.length + '/' + reviewLines.length + ' 句）' : '');
     if (online) {
-      const ready = await renderCloudDialogue(lines,voices,onlineClips,onlineRequest.signal,(i,line,voice) => {
+      const ready = await renderCloudDialogue(lines,voices,onlineClips,onlineRequest.signal,(i,line,voice,provider) => {
         if (live()) showJob('synthesize','online','逐句生成自然配音',
-          '第 ' + (i+1) + ' / ' + lines.length + ' 句 · ' + line.speaker + ' · ' + voiceLabels[voice],
+          '第 ' + (i+1) + ' / ' + lines.length + ' 句 · ' + line.speaker + ' · ' + serviceVoice(voice,provider),
           {unit:'lines',loaded:i,total:lines.length});
-      });
+      },{allowBackup,routeState:onlineRoute});
       if (!live()) return;
       if (!partial) clearReview();
       openCard({title,lines:ready,voices,cloud:true});
@@ -683,7 +718,7 @@ const cloud = cloudPanel((previous,lines,voices) => {
   openCard({title,lines,voices,cloud:true,resumeIndex:active});
   note(id('playerNote'),'自然配音已就绪，点「播放」听对话。');
   showPlayer();
-});
+},() => backupAllowed);
 const proof = id('proofPanel');
 const shortReply = text => /^\p{Script=Han}{1,2}[。！？!?，,]*$/u.test(text.trim());
 proof.ontoggle = () => {
@@ -726,8 +761,8 @@ id('applyProof').onclick = async () => {
     id('applyProof').disabled = true;
     for (const field of fields) field.disabled = true;
     try {
-      const ready = await cloud.render(lines,(i,line,voice) => {
-        note(id('proofNote'),'正在整理第 ' + (i+1) + ' / ' + lines.length + ' 句 · ' + voiceLabels[voice]);
+      const ready = await cloud.render(lines,(i,line,voice,provider) => {
+        note(id('proofNote'),'正在整理第 ' + (i+1) + ' / ' + lines.length + ' 句 · ' + serviceVoice(voice,provider));
       });
       if (card !== target || !proof.open) return;
       openCard({title,lines:ready,voices,cloud:true,resumeIndex:active});
@@ -754,6 +789,7 @@ function openCard(next,keepCloudVoices = false) {
   id('repeatLine').checked = false;
   card = {...next,urls:next.native ? [] : next.lines.map(line => line.blob ? URL.createObjectURL(line.blob) : line.audio)};
   proof.hidden = !(next.native && next.online || next.cloud && next.voices?.size);
+  id('proofBackupSettings').hidden = !next.cloud;
   id('proofDisclosure').textContent = next.cloud ? '重新配音时，TTS.ai 会收到需要新录音的英文和对应音色。未修改的录音直接复用。'
     : '此旧版卡片使用本机朗读。修改英文只会更新本机台词。';
   id('applyProof').textContent = next.cloud ? '同意并为修改的英文重新配音' : '使用修改后的英文';
@@ -766,6 +802,8 @@ function openCard(next,keepCloudVoices = false) {
   if (textOnly && next.online) id('cloudPanel').open = true;
   id('cardTitle').textContent = next.title;
   id('cardMeta').textContent = (next.cloud ? 'Kokoro 在线配音 · ' : textOnly ? '英文已就绪 · ' : next.native ? '本机系统声音 · ' : next.demo ? 'Heart × Michael 双人试听 · ' : '已配音 · ') + next.lines.length + ' 段对白';
+  const backupCount = next.lines.filter(line => line.voiceProvider === 'huggingface').length;
+  if (backupCount) id('cardMeta').textContent += ' · ' + backupCount + ' 段使用 Hugging Face 备用配音';
   id('player').hidden = false;
   id('cardActions').hidden = !!next.demo;
   id('practiceTitle').value = next.title;

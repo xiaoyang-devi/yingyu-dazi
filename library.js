@@ -103,6 +103,7 @@ async function packed(card) {
   for (const line of card.lines) {
     if (!validText(line?.speaker,128) || !validText(line.zh,12000) || !validText(line.en,12000)) throw unavailable()
     const item={speaker:line.speaker,zh:line.zh,en:line.en}
+    if (card.cloud && line.voiceProvider === 'huggingface') item.voiceProvider='huggingface'
     if (!native) {
       item.blob = await validWave(line.blob)
       bytes += item.blob.size
