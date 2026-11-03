@@ -1,7 +1,7 @@
 import {parseText} from './intake.js?v=4';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=8';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=7';
-import {planOnline, translateOnline, isReadableEnglish} from './online-translate.js?v=10';
+import {planOnline, translateOnline, isReadableEnglish} from './online-translate.js?v=10.1';
 import {cloudPanel} from './cloud-panel.js?v=10';
 import {localEnglishVoices, createLocalReader} from './native-speech.js';
 
@@ -65,7 +65,8 @@ function updateOnlinePlan() {
   if (onlineMode()) id('quickIntro').textContent = onlineIssue || (onlinePlan && !needed
     ? '纯英文可直接制卡。卡片里可选系统朗读，或选 Heart 女声和 Michael 男声在线配音。'
     : '首次也无需下载模型。MyMemory 翻译后，可听系统朗读，或选 Heart 女声和 Michael 男声在线配音。');
-  if (onlineMode() && onlineCache.size && onlinePlan) id('quickIntro').textContent = needed
+  if (onlineMode() && reviewLines && !needed && reviewedLines().some(line => !line.en)) id('quickIntro').textContent = '剩余符号可以直接在本页补写英文。';
+  else if (onlineMode() && onlineCache.size && onlinePlan) id('quickIntro').textContent = needed
     ? '已完成的译文保留在本页，本次只发送还需要翻译的原句。'
     : '本次所需译文已齐全，可以直接制卡。';
   if (onlineMode()) id('generate').textContent = reviewLines && needed ? '只重试待译的 ' + onlinePlan.count + ' 段' : '▷ 生成在线快读卡';
@@ -729,6 +730,7 @@ const cloud = cloudPanel((previous,lines) => {
   showPlayer();
 });
 const proof = id('proofPanel');
+const shortReply = text => /^\p{Script=Han}{1,2}[。！？!?，,]*$/u.test(text.trim());
 proof.ontoggle = () => {
   const rows = id('proofRows');
   if (!proof.open || proof.hidden) {rows.replaceChildren();return;}
@@ -736,7 +738,7 @@ proof.ontoggle = () => {
   id('cloudPanel').hidden = true;
   const fields = card.lines.map((line,i) => {
     const label = document.createElement('label'), original = document.createElement('span'), field = document.createElement('textarea');
-    original.textContent = (i+1) + ' · ' + line.speaker + '　' + line.zh;
+    original.textContent = (i+1) + ' · ' + line.speaker + '　' + line.zh + (shortReply(line.zh) ? '　· 短回复，请结合上下句核对' : '');
     field.value = line.en; field.lang = 'en'; field.rows = 2; field.maxLength = 8000;
     label.append(original,field);
     return label;
@@ -767,6 +769,8 @@ function openCard(next,keepCloudVoices = false) {
   id('repeatLine').checked = false;
   card = {...next,urls:next.native ? [] : next.lines.map(line => line.blob ? URL.createObjectURL(line.blob) : line.audio)};
   proof.hidden = !next.online || !next.native;
+  const shortCount = next.lines.filter(line => shortReply(line.zh)).length;
+  id('proofHint').textContent = shortCount ? shortCount + ' 句短回复建议结合上下文核对' : '按上下文修改译文';
   proof.open = false;
   id('proofRows').replaceChildren();
   cloud.open(card,keepCloudVoices);

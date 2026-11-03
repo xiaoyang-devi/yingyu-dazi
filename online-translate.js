@@ -23,6 +23,12 @@ function byteParts(text) {
   return parts;
 }
 
+function directEnglish(text) {
+  if (needsTranslation(text)) return '';
+  if (/^[?？\s]+$/u.test(text)) return 'Huh?';
+  return /[\p{L}\p{N}]/u.test(text) ? text : '';
+}
+
 function prepare(messages) {
   if (!Array.isArray(messages) || !messages.length) throw Error('请先导入聊天文字。');
   const lines = [], unique = new Set();
@@ -44,7 +50,7 @@ function prepare(messages) {
             else spaces += part;
             continue;
           }
-          lines.push({speaker:message.speaker,zh:spaces + part,en:needsTranslation(q) ? '' : q});
+          lines.push({speaker:message.speaker,zh:spaces + part,en:directEnglish(q)});
           spaces = '';
           if (lines.length > maxLines) throw Error('每次最多生成 200 句，请缩短选区。');
           if (needsTranslation(q) && !unique.has(q)) {
@@ -165,6 +171,7 @@ export async function translateOnline(messages,onProgress = () => {},{signal,cac
       if (line.en) continue;
       const q = line.zh.trim(), en = cache.get(q);
       if (isReadableEnglish(en)) line.en = en;
+      else if (!needsTranslation(q)) line.failureReason = '原文只有符号或表情，可补写想听的英文。';
       else line.failureReason = invalid.has(q) ? invalidResult : stopReason || invalidResult;
     }
     return lines;

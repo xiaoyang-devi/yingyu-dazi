@@ -11,7 +11,7 @@
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./style.css?v=10">
-  <script type="module" src="./app.js?v=10"></script>
+  <script type="module" src="./app.js?v=10.1"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -73,7 +73,7 @@
     <section class="work-card player" id="player" aria-labelledby="cardTitle" hidden>
       <div class="player-heading"><div class="section-head"><div class="kicker">02 <span></span> LISTEN</div><h2 id="cardTitle" tabindex="-1"></h2><p id="cardMeta" class="small"></p></div></div>
       <details id="proofPanel" class="cloud-panel" hidden>
-        <summary><span>校对英文<small>按上下文修改译文</small></span><span class="adjust">编辑</span></summary>
+        <summary><span>校对英文<small id="proofHint">按上下文修改译文</small></span><span class="adjust">编辑</span></summary>
         <div class="cloud-body"><p class="small">修改仅在本页生效，保存后朗读和字幕都会使用新台词。</p>
           <div id="proofRows"></div><button type="button" id="applyProof" class="plain">使用修改后的英文</button>
           <p id="proofNote" class="small" role="status"></p>
