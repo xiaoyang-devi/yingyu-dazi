@@ -58,22 +58,18 @@ export async function translateLocally(messages, onProgress = () => {}) {
   if (globalThis.isSecureContext === false || typeof Worker !== 'function' || typeof WebAssembly !== 'object') throw new Error('当前浏览器不支持本机翻译。请使用较新版本的 Safari 或 Chrome。')
   onProgress({stage:'load', phase:'prepare', message:'正在打开本机翻译组件…'})
   // Dispose of the inference process at the end, before the voice model needs memory.
-  const worker = new Worker(new URL('./mt-worker.js?v=4', import.meta.url), {type:'module',name:'local-translation'})
-  let timer, cancel
+  const worker = new Worker(new URL('./mt-worker.js?v=5', import.meta.url), {type:'module',name:'local-translation'})
+  let cancel
   try {
     await new Promise((resolve,reject) => {
       cancel = () => reject(new DOMException('已取消本机翻译。','AbortError'))
       cancelCurrent = cancel
-      function arm(ms) {
-        clearTimeout(timer)
-        timer = setTimeout(() => reject(new Error('本机翻译长时间没有响应。请检查模型下载、保持页面打开，或分段重试。')), ms)
-      }
-      arm(180000)
-      worker.onerror = e => { e.preventDefault(); reject(new Error('翻译进程未能运行。请检查网络、浏览器和可用内存。')) }
+      // Initializing WASM or resuming a suspended tab need not produce an event.
+      // Silence alone is not evidence of failure; the UI offers a manual retry.
+      worker.onerror = e => { e.preventDefault(); reject(new Error('浏览器中的翻译进程已停止。请回到 Safari 前台再试。')) }
       worker.onmessageerror = () => reject(new Error('浏览器未能读取本机翻译结果。'))
       let finished = 0
       worker.onmessage = ({data}) => {
-        arm(data.type === 'progress' && data.stage === 'load' ? 180000 : 120000)
         if (data.type === 'progress') { try { onProgress(data) } catch (e) { reject(e) } }
         else if (data.type === 'line') {
           if (finished >= pending.length || data.index !== finished || typeof data.en !== 'string' || !data.en.trim()) { reject(new Error('本机翻译返回了不完整的句子。')); return }
@@ -87,6 +83,6 @@ export async function translateLocally(messages, onProgress = () => {}) {
     return cards
   } finally {
     if (cancelCurrent === cancel) cancelCurrent = undefined
-    clearTimeout(timer); worker.terminate()
+    worker.terminate()
   }
 }

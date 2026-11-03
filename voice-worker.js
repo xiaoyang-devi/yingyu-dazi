@@ -1,4 +1,4 @@
-import {modelFileProgress} from './model-progress.js';
+import {modelFileProgress} from './model-progress.js?v=5';
 // Pinned browser bundle from the Kokoro authors. The phonemizer and tokenizer run here.
 const PACKAGE = "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js";
 const WASM = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1/dist/";

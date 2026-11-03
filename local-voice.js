@@ -4,11 +4,10 @@ export const LOCAL_VOICES = Object.freeze([
 ]);
 
 let worker;
-let nextId = 0, timer;
+let nextId = 0;
 const pending = new Map();
 
 function stop(error) {
-  clearTimeout(timer);
   worker?.terminate();
   worker = undefined;
   for (const job of pending.values()) job.reject(error);
@@ -17,13 +16,6 @@ function stop(error) {
 
 export function releaseLocalVoice() {
   stop(new DOMException("本机配音已取消","AbortError"));
-}
-
-function watch() {
-  clearTimeout(timer);
-  if (pending.size) {
-    timer = setTimeout(() => stop(new Error("本机配音长时间没有响应。请保持页面打开，检查网络或分段重试。")), 180000);
-  }
 }
 
 function getWorker() {
@@ -38,12 +30,10 @@ function getWorker() {
     const request = pending.get(data?.id);
     if (!request) return;
     if (typeof data.status === "string") {
-      watch();
       try { request.onProgress?.(data.status,data.detail); } catch { /* Optional UI callback. */ }
       return;
     }
     pending.delete(data.id);
-    watch();
     if (data.error || !(data.wav instanceof ArrayBuffer) || data.wav.byteLength <= 44) {
       request.reject(new Error(data.error || "收到的本机录音不完整。"));
     } else {
@@ -66,8 +56,7 @@ export async function renderLocalVoice(text,voice,onProgress) {
   const engine = getWorker(), id = ++nextId;
   return new Promise((resolve,reject)=>{
     pending.set(id,{resolve,reject,onProgress});
-    watch();
     try { engine.postMessage({id,text:text.trim(),voice}); }
-    catch (error) { pending.delete(id); watch(); reject(error); }
+    catch (error) { pending.delete(id); reject(error); }
   });
 }

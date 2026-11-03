@@ -1,6 +1,6 @@
 import {parseText} from './intake.js?v=4';
-import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=5';
-import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=5';
+import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=5.2';
+import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=5.2';
 import {localEnglishVoices, createLocalReader} from './native-speech.js';
 
 const id = key => document.getElementById(key);
@@ -28,8 +28,30 @@ function note(node, message, error = false) {
   node.textContent = message;
   node.dataset.kind = error ? 'error' : 'info';
 }
+// A missing worker event is ambiguous on a phone: the engine might still be
+// compiling or the page may have been suspended. Warn without killing work.
+let waitTimer;
+function clearWaitHint() {
+  clearTimeout(waitTimer);
+  id('jobWait').hidden = true;
+}
+function watchVisibleWork() {
+  clearWaitHint();
+  const panel = id('jobProgress');
+  if (!working || document.hidden || panel.hidden || panel.dataset.stage === 'complete') return;
+  waitTimer = setTimeout(() => {
+    if (!working || document.hidden || panel.hidden) return;
+    const hint = navigator.onLine === false && ['translation-model','voice-model'].includes(panel.dataset.stage)
+      ? '设备显示离线。首次使用需联网下载模型；恢复网络后，可继续等或重新尝试。'
+      : '这一步暂时没有新进度，网页仍在等待。可留在本页继续等；若一直不动，点「重新尝试」。';
+    id('waitHint').textContent = hint;
+    id('jobWait').hidden = false;
+  }, 45000);
+}
+document.addEventListener('visibilitychange',watchVisibleWork);
 // Percentages are local to the current measured operation, never a time estimate.
 function resetJobProgress() {
+  clearWaitHint();
   const panel = id('jobProgress');
   panel.hidden = true;
   delete panel.dataset.stage;
@@ -41,6 +63,7 @@ function resetJobProgress() {
   note(id('progress'),'');
 }
 function megabytes(bytes) {
+  if (bytes > 0 && bytes < 10000) return '不到 0.01 MB';
   return (bytes / 1000000).toLocaleString('zh-CN',{maximumFractionDigits:bytes < 1000000 ? 2 : 1}) + ' MB';
 }
 function showJob(stage,phase,title,message,measure = {}) {
@@ -49,6 +72,7 @@ function showJob(stage,phase,title,message,measure = {}) {
   panel.hidden = false;
   panel.dataset.stage = stage;
   panel.dataset.phase = phase;
+  watchVisibleWork();
   id('jobStage').textContent = title;
   const {loaded,total,unit} = measure;
   const hasLoaded = Number.isFinite(loaded) && loaded >= 0;
@@ -325,6 +349,7 @@ source.addEventListener('blur', () => {
 
 function setBusy(value) {
   working = value;
+  if (!value) clearWaitHint();
   source.readOnly = value;
   id('generate').disabled = value || readingFile;
   id('engine').disabled = id('chatFile').disabled = id('rangeFrom').disabled = id('rangeTo').disabled = value;
@@ -342,29 +367,20 @@ function cancelJob() {
   cancelLocalTranslation();
   releaseLocalVoice();
   setBusy(false);
-  note(id('progress'),nativeMode() ? '已取消。原文仍在，可以调整后再试。' : '已取消。你可以改选「轻量朗读」继续，原文仍在。');
+  note(id('progress'),'已取消。原文和所选范围都保留在本页，可以重新生成。');
 }
 id('cancel').onclick = cancelJob;
+id('retryJob').onclick = () => {
+  if (!working) return;
+  cancelJob();
+  id('generate').click();
+};
 
 async function makeLines(messages, tell) {
   const lines = await translateLocally(messages,tell);
   if (!lines.length || lines.some(line => !line.en?.trim())) throw Error('部分句子没有可朗读的英文，请检查原文。');
   // The translator preserves exact source spans and skips inference on English.
   return lines.map(line => han.test(line.zh) ? line : {...line,en:line.zh});
-}
-async function voiceLine(line, voice, tell) {
-  let timer, arm;
-  const idle = new Promise((_, reject) => {
-    arm = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => reject(Error('配音长时间没有进度。请检查网络、保持页面打开，或把材料分段重试。')),180000);
-    };
-    arm();
-  });
-  try {
-    const audio = renderLocalVoice(line.en,voice,(message,detail) => { arm(); tell(detail || message); });
-    return await Promise.race([audio,idle]);
-  } finally { clearTimeout(timer); }
 }
 id('generate').onclick = async () => {
   if (working || readingFile) return;
@@ -410,8 +426,9 @@ id('generate').onclick = async () => {
     showModel('voice-model',{phase:'prepare',message:'正在启动本机语音组件，并检查所需的声音文件。'});
     for (const [i,line] of lines.entries()) {
       if (i) showSpeech(i,lines.length,line);
-      const blob = await voiceLine(line,voices.get(line.speaker),info => {
+      const blob = await renderLocalVoice(line.en,voices.get(line.speaker),(message,detail) => {
         if (!live()) return;
+        const info = detail || message;
         const data = typeof info === 'string' ? {message:info} : info;
         if (data.stage === 'load') showModel('voice-model',data);
         else if (data.stage === 'synthesize') showSpeech(i,lines.length,line,data.message);
@@ -427,8 +444,12 @@ id('generate').onclick = async () => {
     showPlayer();
   } catch (error) {
     if (live()) {
+      const panel = id('jobProgress'), stage = panel.dataset.stage;
+      const voiceFailed = !native && ['voice-model','synthesize'].includes(stage);
+      const where = id('jobStage').textContent, metric = id('jobMetric').textContent;
       resetJobProgress();
-      note(id('progress'),'生成未完成。' + (error.message || '请分段重试。') + (native ? '' : ' 可改选「轻量朗读」继续。'),true);
+      note(id('progress'),'生成未完成（' + where + (metric ? '，' + metric : '') + '）。' + (error.message || '请重试。') +
+        (voiceFailed ? ' 译文已保留在本页，可改选「轻量朗读」直接使用。' : ' 原文仍在，点生成可重试。'),true);
     }
   } finally {
     if (live()) { releaseLocalVoice(); setBusy(false); }

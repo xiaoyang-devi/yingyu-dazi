@@ -10,8 +10,8 @@
   <meta name="apple-mobile-web-app-title" content="英语搭子">
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="./style.css?v=5">
-  <script type="module" src="./app.js?v=5.1"></script>
+  <link rel="stylesheet" href="./style.css?v=5.2">
+  <script type="module" src="./app.js?v=5.2"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -44,6 +44,7 @@
         <div class="job-top"><div><span class="job-label">制作进度</span><strong id="jobStage">准备制作</strong></div><span id="jobMetric"></span></div>
         <div class="job-track"><progress id="jobBar" max="100" aria-labelledby="jobStage" aria-describedby="jobDetail"></progress></div>
         <div class="job-bottom"><p id="jobDetail"></p><button id="cancel" type="button" class="plain" hidden>取消生成</button></div>
+        <div id="jobWait" hidden><p id="waitHint" role="status"></p><button id="retryJob" type="button" class="plain">重新尝试</button></div>
       </div>
       <div class="job-line"><p id="progress" aria-live="polite" aria-atomic="true" role="status"></p></div>
     </section>

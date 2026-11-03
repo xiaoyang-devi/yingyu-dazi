@@ -71,7 +71,7 @@ select{border:1px solid var(--line);border-radius:7px;background:var(--white);co
 .range-row input{width:4.2em;max-width:30vw;min-height:38px;text-align:center;border:1px solid var(--line);border-radius:6px;background:var(--white);color:var(--ink);font-size:16px}.range-actions .plain{min-height:38px}.range-actions button:disabled{cursor:default}
 #rangeNote,#rangePreview{margin:7px 0;overflow-wrap:anywhere}#rangePreview{font-size:12px}
 
-.job-progress{margin-top:15px;border:1px solid #b8c8a2;border-radius:12px;background:#f1f5e5;padding:12px 14px;scroll-margin-block:12px}
+.job-progress{margin-top:15px;border:1px solid #b8c8a2;border-radius:12px;background:#f1f5e5;padding:12px 14px;scroll-margin-block:12px;scroll-margin-bottom:calc(12px + env(safe-area-inset-bottom,0px))}
 .job-top,.job-bottom{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .job-label{display:block;color:#5a694d;font-size:11px;font-weight:650;letter-spacing:.09em}#jobStage{display:block;font-size:16px;line-height:1.4;overflow-wrap:anywhere}
 #jobMetric{flex:none;font:650 17px/1.25 ui-monospace,Menlo,monospace;color:var(--dark);font-variant-numeric:tabular-nums}
@@ -82,4 +82,6 @@ select{border:1px solid var(--line);border-radius:7px;background:var(--white);co
 @keyframes job-travel{to{transform:translateX(234%)}}
 #jobDetail{color:#4d5d4b;margin:0;font-size:13px;line-height:1.45;overflow-wrap:anywhere}.job-bottom #cancel{margin:0;min-height:34px;font-size:12px;white-space:nowrap}
 #progress.sr-only{position:absolute;width:1px;height:1px;clip-path:inset(50%);overflow:hidden;white-space:nowrap;margin:0}
+#jobWait{border-top:1px solid #c7d4ba;margin-top:10px;padding-top:9px;display:flex;align-items:center;gap:12px;justify-content:space-between}
+#waitHint{margin:0;color:#435140;font-size:13px;line-height:1.55}#retryJob{white-space:nowrap;min-height:42px;flex-shrink:0}
 @media(prefers-reduced-motion:reduce){.job-progress[data-indeterminate="true"] .job-track:after{animation:none;background:repeating-linear-gradient(45deg,#8ba47b 0 6px,#688753 6px 12px);width:100%}}
