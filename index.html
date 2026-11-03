@@ -10,8 +10,8 @@
   <meta name="apple-mobile-web-app-title" content="英语搭子">
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="./style.css?v=9">
-  <script type="module" src="./app.js?v=9"></script>
+  <link rel="stylesheet" href="./style.css?v=10">
+  <script type="module" src="./app.js?v=10"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -41,6 +41,13 @@
       <p id="quickIntro" class="small">生成译文后，可直接朗读，也可选 Heart 女声和 Michael 男声在线配音。</p>
       <p id="nativeSupport" class="small" role="status" hidden></p>
       <details id="roles" hidden><summary><span>角色与声音 <small id="peopleCount"></small></span><span class="adjust">调整</span></summary><div id="cast"></div><p class="small" id="roleHint">按发言顺序分配声音，可为每个人重新选择。</p></details>
+      <section id="translationReview" class="translation-review" aria-labelledby="reviewHeading" hidden>
+        <h3 id="reviewHeading" tabindex="-1">核对待补的英文</h3>
+        <p id="reviewSummary" class="small" role="status"></p>
+        <p class="small">可以直接补英文，修改留在本页。也可以在下方重新同意，只重试待译的原句。</p>
+        <div id="reviewRows"></div>
+        <button id="finishReview" class="plain" type="button"></button>
+      </section>
       <div id="onlineTerms" class="online-terms" hidden>
         <strong id="onlineScope"></strong>
         <p>MyMemory 可能长期保存提交的句子，并交给翻译合作方处理。昵称栏、时间栏和 ZIP 附件留在本机。请先删去正文中不想外发的信息。<a href="https://mymemory.translated.net/terms-and-conditions" target="_blank" rel="noopener noreferrer">服务条款</a></p>
@@ -65,6 +72,13 @@
     </section>
     <section class="work-card player" id="player" aria-labelledby="cardTitle" hidden>
       <div class="player-heading"><div class="section-head"><div class="kicker">02 <span></span> LISTEN</div><h2 id="cardTitle" tabindex="-1"></h2><p id="cardMeta" class="small"></p></div></div>
+      <details id="proofPanel" class="cloud-panel" hidden>
+        <summary><span>校对英文<small>按上下文修改译文</small></span><span class="adjust">编辑</span></summary>
+        <div class="cloud-body"><p class="small">修改仅在本页生效，保存后朗读和字幕都会使用新台词。</p>
+          <div id="proofRows"></div><button type="button" id="applyProof" class="plain">使用修改后的英文</button>
+          <p id="proofNote" class="small" role="status"></p>
+        </div>
+      </details>
       <details id="cloudPanel" class="cloud-panel" hidden>
         <summary><span><b>自然双人配音</b><small>Heart 女声 × Michael 男声</small></span><span class="adjust">选声音</span></summary>
         <div class="cloud-body">

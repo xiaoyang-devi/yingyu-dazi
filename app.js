@@ -1,8 +1,8 @@
 import {parseText} from './intake.js?v=4';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=8';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=7';
-import {planOnline, translateOnline} from './online-translate.js?v=8';
-import {cloudPanel} from './cloud-panel.js?v=9';
+import {planOnline, translateOnline, isReadableEnglish} from './online-translate.js?v=10';
+import {cloudPanel} from './cloud-panel.js?v=10';
 import {localEnglishVoices, createLocalReader} from './native-speech.js';
 
 import {savePracticeCard, updatePracticePosition} from './library.js?v=9';
@@ -27,6 +27,17 @@ const choices = () => nativeMode() ? castChoices.native : castChoices.kokoro;
 const kokoroNote = id('downloadNote').textContent;
 let systemVoices = [], cachedTranslation = null;
 let onlinePlan = null, onlineIssue = '', onlineRequest = null, consentSignature = '';
+let onlineCache = new Map(), reviewLines = null;
+function clearReview() {
+  reviewLines = null;
+  id('translationReview').hidden = true;
+  id('reviewRows').replaceChildren();
+}
+function resetOnlineSelection() {
+  clearReview();
+  onlineCache = new Map();
+  revokeConsent();
+}
 function revokeConsent() {
   id('onlineConsent').checked = false;
   consentSignature = '';
@@ -45,7 +56,7 @@ function updateOnlinePlan() {
   onlinePlan = null;
   onlineIssue = '';
   if (onlineMode() && parsed) {
-    try {onlinePlan = planOnline(parsed.messages);} catch (error) {onlineIssue = error.message;}
+    try {onlinePlan = planOnline(parsed.messages,{cache:onlineCache});} catch (error) {onlineIssue = error.message;}
   }
   const needed = Boolean(onlinePlan?.count);
   id('onlineTerms').hidden = !needed;
@@ -54,6 +65,10 @@ function updateOnlinePlan() {
   if (onlineMode()) id('quickIntro').textContent = onlineIssue || (onlinePlan && !needed
     ? '纯英文可直接制卡。卡片里可选系统朗读，或选 Heart 女声和 Michael 男声在线配音。'
     : '首次也无需下载模型。MyMemory 翻译后，可听系统朗读，或选 Heart 女声和 Michael 男声在线配音。');
+  if (onlineMode() && onlineCache.size && onlinePlan) id('quickIntro').textContent = needed
+    ? '已完成的译文保留在本页，本次只发送还需要翻译的原句。'
+    : '本次所需译文已齐全，可以直接制卡。';
+  if (onlineMode()) id('generate').textContent = reviewLines && needed ? '只重试待译的 ' + onlinePlan.count + ' 段' : '▷ 生成在线快读卡';
   previewOnline();
 }
 id('sendPreview').ontoggle = previewOnline;
@@ -271,7 +286,7 @@ function changeEngine() {
   reader.stop();
   paintTransport();
   const native = nativeMode(), online = onlineMode();
-  revokeConsent();
+  resetOnlineSelection();
   id('packPanel').hidden = online;
   id('quickIntro').hidden = !online;
   id('nativeSupport').hidden = !native;
@@ -310,7 +325,7 @@ function setRange(first,last) {
   id('rangeTo').value = last;
 }
 function resetSource(raw, known) {
-  revokeConsent();
+  resetOnlineSelection();
   scannedText = raw;
   corpus = null;
   corpusError = '';
@@ -411,7 +426,7 @@ id('chatFile').onchange = async event => {
   }
 };
 function editedRange() {
-  revokeConsent();
+  resetOnlineSelection();
   if (readingFile) {
     cancelImport();
     note(id('fileStatus'),'已取消导入，保留当前范围。');
@@ -448,6 +463,8 @@ source.addEventListener('blur', () => {
 function setBusy(value) {
   working = value;
   id('onlineConsent').disabled = value;
+  for (const field of id('reviewRows').querySelectorAll('textarea')) field.disabled = value;
+  if (reviewLines) updateReviewSummary();
   if (!value) clearWaitHint();
   source.readOnly = value;
   id('generate').disabled = id('preparePack').disabled = value || readingFile;
@@ -495,6 +512,62 @@ async function makeLines(messages, tell, bypassCache) {
   // The translator preserves exact source spans and skips inference on English.
   return lines.map(line => han.test(line.zh) ? line : {...line,en:line.zh});
 }
+function reviewedLines() {
+  return reviewLines.map(line => ({speaker:line.speaker,zh:line.zh,en:line.en || onlineCache.get(line.zh.trim()) || ''}));
+}
+function updateReviewSummary() {
+  const lines = reviewedLines(), missing = lines.filter(line => !line.en).length, ready = lines.length - missing;
+  id('reviewSummary').textContent = '已准备 ' + ready + ' / ' + lines.length + ' 句，尚有 ' + missing + ' 句待补。';
+  id('finishReview').textContent = missing ? '仅用已译的 ' + ready + ' 句制卡（略过 ' + missing + ' 句）' : '用完整译文生成听力卡';
+  id('finishReview').disabled = working || ready === 0 || !!id('reviewRows').querySelector('[aria-invalid="true"]');
+}
+function showReview(lines) {
+  reviewLines = lines;
+  const missing = new Map();
+  for (const [i,line] of lines.entries()) {
+    if (line.en) continue;
+    const key = line.zh.trim();
+    if (!missing.has(key)) missing.set(key,{reason:line.failureReason,positions:[]});
+    missing.get(key).positions.push(i+1);
+  }
+  const rows = Array.from(missing,([key,{reason,positions}]) => {
+    const row = document.createElement('label'), heading = document.createElement('strong');
+    const original = document.createElement('span'), detail = document.createElement('small'), field = document.createElement('textarea');
+    heading.textContent = '第 ' + positions.join('、') + ' 句';
+    original.textContent = key;
+    detail.textContent = reason;
+    field.lang = 'en'; field.rows = 2; field.maxLength = 8000;
+    field.placeholder = '填写这句的英文';
+    field.oninput = () => {
+      const text = field.value.trim(), valid = text && isReadableEnglish(text);
+      if (valid) onlineCache.set(key,text); else onlineCache.delete(key);
+      field.setAttribute('aria-invalid',String(!!text && !valid));
+      detail.textContent = text && !valid ? '请填写可朗读的英文。' : valid ? '已在本页补好。' : reason;
+      revokeConsent();updateOnlinePlan();updateReviewSummary();
+    };
+    row.append(heading,original,detail,field);
+    return row;
+  });
+  id('reviewRows').replaceChildren(...rows);
+  id('translationReview').hidden = false;
+  updateReviewSummary();
+  id('reviewHeading').focus();
+}
+function dialogueTitle(messages) {
+  const people = speakerNames(messages);
+  return people.slice(0,2).join('、') + (people.length > 2 ? '等' : '') + '的对话';
+}
+id('finishReview').onclick = () => {
+  if (!reviewLines || working || id('finishReview').disabled) return;
+  const lines = reviewedLines().filter(line => line.en), total = reviewLines.length;
+  const partial = lines.length < total;
+  openCard({title:dialogueTitle(parsed.messages) + (partial ? '（节选 ' + lines.length + '/' + total + ' 句）' : ''),
+    lines,voices:new Map(choices()),native:true,online:true,demo:false});
+  if (!partial) clearReview();
+  revokeConsent();updateOnlinePlan();
+  finishJob(partial ? '已制成节选卡。待译的原句仍在上方，可以继续补全。' : '完整听力卡已就绪。');
+  showPlayer();
+};
 id('generate').onclick = () => startGeneration(false);
 async function startGeneration(bypassCache) {
   if (working || readingFile) return;
@@ -507,6 +580,8 @@ async function startGeneration(bypassCache) {
   }
   const native = nativeMode(), online = onlineMode();
   if (online) {
+    const invalid = id('reviewRows').querySelector('[aria-invalid="true"]');
+    if (invalid) {note(id('progress'),'请先改好或清空标出的英文。',true);invalid.focus();return;}
     if (onlineIssue) {note(id('progress'),onlineIssue,true);return;}
     if (onlinePlan?.count && (!id('onlineConsent').checked || consentSignature !== JSON.stringify(onlinePlan.segments))) {
       revokeConsent();
@@ -544,14 +619,20 @@ async function startGeneration(bypassCache) {
     if (online) {
       lines = await translateOnline(input,info => {
         if (live()) showJob('online','translate','MyMemory 在线翻译',info.message,info);
-      },{signal:onlineRequest.signal});
+      },{signal:onlineRequest.signal,cache:onlineCache});
     } else {
       lines = reuse ? cachedTranslation.lines : await makeLines(input, info => { if (live()) showTranslation(info); },bypassCache);
     }
     if (!live()) return;
+    if (online && lines.some(line => !line.en)) {
+      resetJobProgress();
+      showReview(lines);
+      note(id('progress'),'已保留本次结果。请核对上方列出的待译原句。');
+      return;
+    }
+    clearReview();
     if (!online) cachedTranslation = {original,selection,lines};
-    const people = speakerNames(input);
-    const title = people.slice(0,2).join('、') + (people.length > 2 ? '等' : '') + '的对话';
+    const title = dialogueTitle(input);
     if (native) {
       openCard({title,lines,voices,native:true,online,demo:false});
       finishJob(online ? '已准备 ' + lines.length + ' 段英文，可在卡片里选择「自然双人配音」。' : '已准备 ' + lines.length + ' 段，点「播放」使用本地系统声音。');
@@ -647,7 +728,37 @@ const cloud = cloudPanel((previous,lines) => {
   note(id('playerNote'),'自然配音已就绪，点「播放」听对话。');
   showPlayer();
 });
-function openCard(next) {
+const proof = id('proofPanel');
+proof.ontoggle = () => {
+  const rows = id('proofRows');
+  if (!proof.open || proof.hidden) {rows.replaceChildren();return;}
+  cloud.cancel();
+  id('cloudPanel').hidden = true;
+  const fields = card.lines.map((line,i) => {
+    const label = document.createElement('label'), original = document.createElement('span'), field = document.createElement('textarea');
+    original.textContent = (i+1) + ' · ' + line.speaker + '　' + line.zh;
+    field.value = line.en; field.lang = 'en'; field.rows = 2; field.maxLength = 8000;
+    label.append(original,field);
+    return label;
+  });
+  rows.replaceChildren(...fields);
+  note(id('proofNote'),'');
+};
+proof.addEventListener('toggle',() => {if (!proof.open && !proof.hidden && card) id('cloudPanel').hidden = false;});
+id('applyProof').onclick = () => {
+  if (!proof.open || proof.hidden || !card?.online) return;
+  const fields = [...id('proofRows').querySelectorAll('textarea')];
+  if (fields.length !== card.lines.length) return;
+  const invalid = fields.findIndex((field,i) => !isReadableEnglish(field.value) && field.value.trim() !== card.lines[i].en);
+  if (invalid >= 0) {
+    note(id('proofNote'),'请核对第 ' + (invalid+1) + ' 句，填写可朗读的英文。',true);
+    fields[invalid].focus();return;
+  }
+  const lines = card.lines.map((line,i) => ({...line,en:fields[i].value.trim()}));
+  openCard({title:id('practiceTitle').value.trim() || card.title,lines,native:true,online:true,voices:card.voices,resumeIndex:active},true);
+  note(id('playerNote'),'已更新英文台词。');
+};
+function openCard(next,keepCloudVoices = false) {
   clearAudio();
   cardVersion++;
   saving = false;
@@ -655,7 +766,10 @@ function openCard(next) {
   endedAll = false;
   id('repeatLine').checked = false;
   card = {...next,urls:next.native ? [] : next.lines.map(line => line.blob ? URL.createObjectURL(line.blob) : line.audio)};
-  cloud.open(card);
+  proof.hidden = !next.online || !next.native;
+  proof.open = false;
+  id('proofRows').replaceChildren();
+  cloud.open(card,keepCloudVoices);
   const textOnly = next.native && !next.voices?.size;
   if (textOnly && next.online) id('cloudPanel').open = true;
   id('cardTitle').textContent = next.title;

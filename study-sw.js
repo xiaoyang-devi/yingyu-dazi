@@ -1,9 +1,9 @@
 // Only these published resources are needed to reopen the studio, a local card or the example.
 const scope = new URL(self.registration.scope);
 const prefix = 'yingyu-dazi-app-shell:' + scope.pathname + ':';
-const cacheName = prefix + '9.0';
+const cacheName = prefix + '10.0';
 const files = [
-  'index.html', 'app.js?v=9', 'style.css?v=9', 'cloud-panel.js?v=9', 'cloud-voice.js?v=9', 'online-translate.js?v=8', 'library-view.js?v=9', 'library.js?v=9',
+  'index.html', 'app.js?v=10', 'style.css?v=10', 'cloud-panel.js?v=10', 'cloud-voice.js?v=9', 'online-translate.js?v=10', 'library-view.js?v=9', 'library.js?v=9',
   'intake.js?v=4', 'local-translate.js?v=8', 'local-voice.js?v=7', 'native-speech.js',
   'chat-file.js', 'export-card.js', 'offline-player.txt', 'app.webmanifest',
   'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png',

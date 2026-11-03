@@ -5,8 +5,8 @@ const endpoint = 'https://api.mymemory.translated.net/get';
 const needsTranslation = text => /\p{Script=Han}/u.test(text);
 const encoder = new TextEncoder();
 const maxBytes = 500, maxCharacters = 5000, maxLines = 200;
-const quotaMessage = '在线翻译今天的免费用量已用完。可稍后再试，或选择本机翻译。';
-const invalidResult = () => Error('在线翻译没有返回可朗读的英文。可缩短选区后重试，或选择本机翻译。');
+const quotaMessage = '在线翻译达到免费用量或请求频率限制。可稍后再试，或选择本机翻译。';
+const invalidResult = '服务未返回可确认的英文译文。';
 const cancelled = () => new DOMException('已取消在线翻译。','AbortError');
 
 function byteParts(text) {
@@ -56,31 +56,51 @@ function prepare(messages) {
       }
     }
   }
-  return {lines,queries:[...unique],characters};
+  return {lines,queries:[...unique]};
 }
 
-export function planOnline(messages) {
-  const {queries,characters} = prepare(messages);
-  return {count:queries.length,characters,segments:queries};
+// The cache belongs to the current selection. Only the caller decides when to discard it.
+export function planOnline(messages,{cache} = {}) {
+  const {queries} = prepare(messages);
+  const segments = queries.filter(q => !isReadableEnglish(cache?.get(q)));
+  return {count:segments.length,characters:segments.reduce((n,q) => n + Array.from(q).length,0),segments};
 }
 
-function english(data) {
-  if ([true,1,'1','true'].includes(data?.quotaFinished) || Number(data?.responseStatus) === 429) throw Error(quotaMessage);
-  const raw = data?.responseData?.translatedText;
-  if (Number(data?.responseStatus) !== 200 || typeof raw !== 'string' || raw.length > 8000) throw invalidResult();
-  if (/^\s*MYMEMORY WARNING/i.test(raw)) throw Error(quotaMessage);
+function decodeText(raw) {
+  if (typeof raw !== 'string' || raw.length > 8000) return '';
   // Some translation-memory records contain entity-escaped punctuation. Never parse HTML.
   const named = {amp:'&',apos:"'",quot:'"',lt:'<',gt:'>',nbsp:' '};
-  const text = raw.replace(/&(amp|apos|quot|lt|gt|nbsp|#\d{1,7}|#x[\da-f]{1,6});/gi, (match,entity) => {
+  return raw.replace(/&(amp|apos|quot|lt|gt|nbsp|#\d{1,7}|#x[\da-f]{1,6});/gi, (match,entity) => {
     entity = entity.toLowerCase();
     if (entity[0] !== '#') return named[entity];
     const code = entity.startsWith('#x') ? parseInt(entity.slice(2),16) : Number(entity.slice(1));
     return code >= 32 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : '';
   }).trim();
+}
+
+export function isReadableEnglish(text) {
+  if (typeof text !== 'string' || !text.trim() || text.length > 8000) return false;
+  const letters = text.match(/\p{L}/gu) || [];
   const numeric = /[0-9]/.test(text) && /^[0-9\p{Sc}\s.,+%‰°:()'’/–—−-]+$/u.test(text);
-  if ((!/\p{Script=Latin}/u.test(text) && !numeric) || needsTranslation(text) || /<\/?[a-z][^>]*>/i.test(text) ||
-      /\bMYMEMORY WARNING\b|^QUERY LENGTH LIMIT EXCEEDED|^INVALID (?:SOURCE|TARGET) LANGUAGE/i.test(text)) throw invalidResult();
-  return text;
+  return (numeric || letters.length > 0 && letters.every(ch => /\p{Script=Latin}/u.test(ch))) &&
+    !/<\/?[a-z][^>]*>|&(?:lt|gt);|\bMYMEMORY WARNING\b|^QUERY LENGTH LIMIT EXCEEDED|^INVALID (?:SOURCE|TARGET) LANGUAGE/i.test(text) &&
+    !/^\s*\[\s*\]\s*\/\s*\([a-z]{1,8}\)\s*\/?\s*$/i.test(text);
+}
+
+function english(data,source) {
+  const status = Number(data?.responseStatus), primary = decodeText(data?.responseData?.translatedText);
+  if ([true,1,'1','true'].includes(data?.quotaFinished) || status === 429 || /^MYMEMORY WARNING/i.test(primary)) throw Error(quotaMessage);
+  if ([400,413,422].includes(status)) return '';
+  if (status !== 200) throw Error('在线翻译服务暂时无法返回英文。请稍后重试。');
+  const matches = Array.isArray(data.matches) ? data.matches : [];
+  // A close match to a different source can have a high score even for one-character replies.
+  const exact = matches.filter(m => typeof m?.segment === 'string' &&
+    m.segment.trim().normalize('NFC') === source.normalize('NFC') &&
+    /^zh(?:[-_]|$)/i.test(m.source) && /^en(?:[-_]|$)/i.test(m.target));
+  const candidates = exact.map(m => decodeText(m.translation));
+  if (isReadableEnglish(primary) && (candidates.includes(primary) ||
+      !matches.some(m => decodeText(m?.translation) === primary))) return primary;
+  return candidates.find(isReadableEnglish) || '';
 }
 
 async function request(q,controller) {
@@ -91,10 +111,11 @@ async function request(q,controller) {
       credentials:'omit',referrerPolicy:'no-referrer',cache:'no-store',redirect:'error',signal:controller.signal
     });
     if (response.status === 429) throw Error(quotaMessage);
+    if ([400,413,422].includes(response.status)) return '';
     if (!response.ok) throw Error('在线翻译服务暂时不可用。可稍后重试，或选择本机翻译。');
     let data;
-    try { data = await response.json(); } catch { throw invalidResult(); }
-    return english(data);
+    try { data = await response.json(); } catch { throw Error('在线翻译服务返回的数据暂时无法读取。请稍后重试。'); }
+    return english(data,q);
   } catch (error) {
     if (controller.signal.aborted) throw controller.signal.reason || cancelled();
     if (error instanceof TypeError) throw Error('未能连接在线翻译服务。可检查网络后重试，或选择本机翻译。');
@@ -102,34 +123,50 @@ async function request(q,controller) {
   } finally { clearTimeout(timer); }
 }
 
-export async function translateOnline(messages,onProgress = () => {},{signal} = {}) {
+export async function translateOnline(messages,onProgress = () => {},{signal,cache = new Map()} = {}) {
   if (signal?.aborted) throw cancelled();
   const {lines,queries} = prepare(messages);
-  if (!queries.length) return lines;
+  const pending = queries.filter(q => !isReadableEnglish(cache.get(q)));
   const controller = new AbortController();
   const abort = () => controller.abort(cancelled());
   signal?.addEventListener('abort',abort,{once:true});
-  const translations = new Map();
-  let next = 0;
+  const invalid = new Set();
+  let next = 0, processed = queries.length - pending.length, stopReason = '';
   function progress() {
-    const loaded = translations.size, total = queries.length;
-    onProgress({stage:'translate',phase:'translate',unit:'lines',loaded,total,
-      message:'在线翻译已完成 ' + loaded + ' / ' + total + ' 个不同片段。'});
+    const total = queries.length;
+    onProgress({stage:'translate',phase:'translate',unit:'lines',loaded:processed,total,
+      message:'已处理 ' + processed + ' / ' + total + ' 个不同片段。' + (invalid.size ? '其中 ' + invalid.size + ' 段需核对英文。' : '')});
   }
   async function take() {
-    while (!controller.signal.aborted && next < queries.length) {
-      const q = queries[next++];
-      const result = await request(q,controller);
-      if (controller.signal.aborted) throw controller.signal.reason || cancelled();
-      translations.set(q,result);
+    while (!controller.signal.aborted && next < pending.length) {
+      const q = pending[next++];
+      let result;
+      try { result = await request(q,controller); }
+      catch (error) {
+        if (signal?.aborted) throw cancelled();
+        if (!stopReason) {
+          stopReason = error.message || '在线翻译暂时不可用。';
+          controller.abort();
+        }
+        return;
+      }
+      if (controller.signal.aborted) return;
+      if (result) cache.set(q,result);
+      else invalid.add(q);
+      processed++;
       progress();
     }
   }
   try {
-    progress();
-    await Promise.all(Array.from({length:Math.min(2,queries.length)},take));
-    if (controller.signal.aborted) throw controller.signal.reason || cancelled();
-    for (const line of lines) if (!line.en) line.en = translations.get(line.zh.trim());
+    if (queries.length) progress();
+    await Promise.all(Array.from({length:Math.min(2,pending.length)},take));
+    if (signal?.aborted) throw cancelled();
+    for (const line of lines) {
+      if (line.en) continue;
+      const q = line.zh.trim(), en = cache.get(q);
+      if (isReadableEnglish(en)) line.en = en;
+      else line.failureReason = invalid.has(q) ? invalidResult : stopReason || invalidResult;
+    }
     return lines;
   } finally {
     controller.abort();

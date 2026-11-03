@@ -66,11 +66,15 @@ export function cloudPanel(onReady) {
     note('已停止。已收到的录音留在这张卡里，本次已发出的请求可能仍会完成。');
     review();
   }
-  function open(next) {
+  function open(next,keepVoices = false) {
     cancel();
+    const previousCast = keepVoices ? cast : null;
     card = next?.native && next.online ? next : null;
     cast = new Map();
-    clips = new Map();
+    if (keepVoices && card) {
+      const lines = new Set(card.lines.map(line => line.en));
+      for (const k of clips.keys()) if (!lines.has(JSON.parse(k)[1])) clips.delete(k);
+    } else clips = new Map();
     note('');
     panel.hidden = !card;
     panel.open = false;
@@ -79,7 +83,8 @@ export function cloudPanel(onReady) {
     el('cloudPreview').open = consent.checked = false;
     if (!card) return;
     for (const name of new Set(card.lines.map(line => line.speaker))) {
-      cast.set(name,CLOUD_VOICES[cast.size % CLOUD_VOICES.length]);
+      const chosen = previousCast?.get(name);
+      cast.set(name,CLOUD_VOICES.includes(chosen) ? chosen : CLOUD_VOICES[cast.size % CLOUD_VOICES.length]);
     }
     el('cloudSwap').hidden = cast.size < 2;
     drawCast();
