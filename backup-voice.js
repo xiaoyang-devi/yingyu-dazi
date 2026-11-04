@@ -1,5 +1,5 @@
 // Hugging Face Space's public Gradio API. Importing this module sends nothing.
-import {readWave,splitLine,waveFromParts} from './cloud-voice.js?v=14';
+import {readWave,splitLine,waveFromParts} from './cloud-voice.js?v=15';
 
 const origin = 'https://kinabraytan-kokoro-tts-server.hf.space';
 const endpoint = origin + '/gradio_api/call/generate_speech';

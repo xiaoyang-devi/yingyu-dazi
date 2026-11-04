@@ -11,7 +11,7 @@
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./style.css?v=14">
-  <script type="module" src="./app.js?v=14"></script>
+  <script type="module" src="./app.js?v=15"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -124,8 +124,8 @@
     <footer><div class="footer-tools"><span>英语搭子 <b>／</b> <a href="./demo/CREDITS.txt">试听来源</a> · <a href="./assets/NOTICE.html">模型与许可</a></span><button type="button" id="shareSite" class="footer-link">分享网站</button><button type="button" id="installHelp" class="footer-link" aria-expanded="false" aria-controls="installTip">添加到 iPhone 主屏幕</button></div><p>在线制作时，每次点击生成才会发送所选台词。纯本机模式的翻译、配音和练习都留在设备上。</p><p id="installTip" hidden>在 iPhone 的 Safari 中打开本站，点分享菜单中的「添加到主屏幕」，再点「添加」。以后请从同一入口打开「我的练习」。</p><p id="shareStatus" role="status"></p></footer>
   </main>
   <template id="backupChoice">
-    <label class="cloud-consent"><input type="checkbox" autocomplete="off">主服务额度用完时，允许切换到 Hugging Face 备用配音</label>
-    <p class="small" hidden>已开启自动接续。剩下的英文台词和音色可能发给社区维护的 <a href="https://huggingface.co/spaces/kinabraytan/kokoro-tts-server" target="_blank" rel="noopener noreferrer">Kokoro 服务</a>。女声换为 Bella，男声仍用 Michael。录音可通过服务生成的链接访问，保留时间未注明。此选择会记在当前浏览器。</p>
+    <label class="cloud-consent"><input type="checkbox" autocomplete="off">主服务额度不足或生成限速时，允许切换到 Hugging Face 备用配音</label>
+    <p class="small" hidden>已开启自动接续。遇到限速后，本次尚未配音的部分会接着使用备用服务，已完成的录音保留。需要新配音的英文和音色可能发给社区维护的 <a href="https://huggingface.co/spaces/kinabraytan/kokoro-tts-server" target="_blank" rel="noopener noreferrer">Kokoro 服务</a>。女声换为 Bella，男声仍用 Michael；服务繁忙时也可能排队。录音可通过服务生成的链接访问，保留时间未注明。此选择会记在当前浏览器。</p>
   </template>
   <audio id="audio" preload="auto" playsinline></audio>
 </body></html>

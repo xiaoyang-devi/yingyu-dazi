@@ -37,7 +37,7 @@ function pause(ms, signal) {
 }
 
 // The free endpoint allows ten submissions per minute. Count submitted attempts even if cancelled.
-async function waitForSubmission(signal, onWait) {
+async function waitForSubmission(signal, onWait, switchOnRateLimit) {
   for (;;) {
     if (signal.aborted) throw signal.reason || cancelled();
     const now = performance.now();
@@ -48,6 +48,7 @@ async function waitForSubmission(signal, onWait) {
       return;
     }
     const waitMs = Math.ceil(60000 - (now - recentSubmissions[0]));
+    if (switchOnRateLimit) throw new VoiceRateLimitError(waitMs);
     onWait(waitMs);
     await pause(waitMs, signal);
   }
@@ -60,6 +61,11 @@ async function request(url, options, signal) {
     if (url === api + '/v1/tts/' && options.method === 'POST' && await confirmsQuota(res)) {
       throw new VoiceQuotaError('TTS.ai 本次免费配音字符不足。');
     }
+    if (url === api + '/v1/tts/' && options.method === 'POST' && res.status === 429) {
+      const retry = res.headers.get('Retry-After');
+      const milliseconds = /^\d+(?:\.\d+)?$/.test(retry || '') ? Number(retry)*1000 : Date.parse(retry) - Date.now();
+      throw new VoiceRateLimitError(Number.isFinite(milliseconds) && milliseconds > 0 ? milliseconds : 60000);
+    }
     throw Error('TTS.ai 暂时限制请求。请稍后重试，已完成的录音会保留。');
   }
   if (!res.ok) {
@@ -71,6 +77,13 @@ async function request(url, options, signal) {
 }
 
 class VoiceQuotaError extends Error {}
+
+class VoiceRateLimitError extends Error {
+  constructor(waitMs) {
+    super('TTS.ai 暂时限制配音请求。已完成的录音会保留。');
+    this.retryAt = Date.now() + Math.max(1000,waitMs);
+  }
+}
 
 async function confirmsQuota(response) {
   // The provider documents 402 insufficient_credits separately from 429 rate_limited.
@@ -173,7 +186,7 @@ async function generatePart(text, voice, signal, job, onSubmitted) {
   }
 }
 
-export async function synthesizeCloudLine(text, voice, signal, {jobs = [],onSubmitted = () => {},onWait = () => {}} = {}) {
+export async function synthesizeCloudLine(text, voice, signal, {jobs = [],onSubmitted = () => {},onWait = () => {},switchOnRateLimit = false,beforeSubmit = () => {}} = {}) {
   if (signal?.aborted) throw cancelled();
   if (!CLOUD_VOICES.includes(voice)) throw Error('请选择在线配音提供的音色。');
   if (typeof text !== 'string') throw Error('这句缺少英文台词。');
@@ -188,13 +201,17 @@ export async function synthesizeCloudLine(text, voice, signal, {jobs = [],onSubm
       if (controller.signal.aborted) throw controller.signal.reason || cancelled();
       const job = jobs[i] || (jobs[i] = {});
       if (job.blob) { clips.push(job.blob); continue; }
-      if (!job.uuid) await waitForSubmission(controller.signal,onWait);
+      if (!job.uuid) {
+        beforeSubmit();
+        await waitForSubmission(controller.signal,onWait,switchOnRateLimit);
+      }
       if (controller.signal.aborted) throw controller.signal.reason || cancelled();
       const timer = setTimeout(() => controller.abort(Error('在线配音响应超时。请检查网络后重试，或在制作台选择纯本机配音。')), 60000);
       try {
         const blob = await generatePart(part, voice, controller.signal,job,onSubmitted);
         if (controller.signal.aborted) throw controller.signal.reason || cancelled();
         job.blob = blob;
+        job.voiceProvider = 'tts.ai';
         clips.push(blob);
       } catch (error) {
         if ([404,410].includes(error.status)) delete job.uuid;
@@ -203,11 +220,7 @@ export async function synthesizeCloudLine(text, voice, signal, {jobs = [],onSubm
       finally { clearTimeout(timer); }
     }
     if (controller.signal.aborted) throw controller.signal.reason || cancelled();
-    if (clips.length === 1) return clips[0];
-    const pcm = clips.map(clip => clip.slice(44));
-    const header = await clips[0].slice(0,44).arrayBuffer();
-    if (controller.signal.aborted) throw controller.signal.reason || cancelled();
-    return waveFromParts(header, pcm);
+    return await joinClips(clips,controller.signal);
   } catch (error) {
     if (controller.signal.aborted) throw controller.signal.reason || cancelled();
     if (error instanceof TypeError) throw Error('未能连接在线配音服务，请检查网络或选择纯本机配音。');
@@ -215,6 +228,18 @@ export async function synthesizeCloudLine(text, voice, signal, {jobs = [],onSubm
   } finally {
     signal?.removeEventListener('abort', abort);
   }
+}
+
+async function joinClips(clips,signal) {
+  if (clips.length === 1) return clips[0];
+  const header = await clips[0].slice(0,44).arrayBuffer();
+  if (signal.aborted) throw signal.reason || cancelled();
+  return waveFromParts(header,clips.map(clip => clip.slice(44)));
+}
+
+function providerFor(jobs) {
+  const providers = new Set(jobs.map(job => job.voiceProvider || 'tts.ai'));
+  return providers.size > 1 ? 'mixed' : providers.values().next().value;
 }
 
 export const cloudClipKey = (voice,text) => JSON.stringify([voice,text]);
@@ -232,9 +257,9 @@ export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allo
   const jobs = routeState.primaryJobs || (routeState.primaryJobs = new Map());
   const tasks = new Map(), ready = new Array(lines.length);
   let characters = 0, completed = 0;
-  function progress(task,provider,phase,waitMs) {
+  function progress(task,provider,phase,waitMs,reason) {
     const i = task.indices[0];
-    onLine(i,lines[i],task.voice,provider,{completed,total:lines.length,phase,waitMs});
+    onLine(i,lines[i],task.voice,provider,{completed,total:lines.length,phase,waitMs,reason});
   }
   function publish(task,clip) {
     if (signal.aborted) return;
@@ -254,7 +279,7 @@ export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allo
     const parts = splitLine(line.en), partJobs = jobs.get(key) || [];
     jobs.set(key,partJobs);
     const needed = parts.reduce((sum,part,i) => sum + (partJobs[i]?.uuid || partJobs[i]?.blob ? 0 : Array.from(part).length),0);
-    tasks.set(key,{key,voice,text:line.en,indices:[i],jobs:partJobs,needed});
+    tasks.set(key,{key,voice,text:line.en,parts,indices:[i],jobs:partJobs,needed});
     if (!clips.has(key)) characters += needed;
   }
   if (characters > 5000 && !allowBackup) throw Error('本次待配音的英文超过 5,000 字符，请缩短选区，或允许使用备用配音。');
@@ -266,8 +291,10 @@ export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allo
     else pending.push(task);
   }
   let next = 0, reserved = 0, failure = null, budgetBlocked = false;
+  let rateLimited = allowBackup && routeState.primaryCooldownUntil > Date.now()
+    ? new VoiceRateLimitError(routeState.primaryCooldownUntil - Date.now()) : null;
   async function primaryWorker() {
-    while (!signal.aborted && !failure && !budgetBlocked && (!allowBackup || !routeState.primaryExhausted) && next < pending.length) {
+    while (!signal.aborted && !failure && !budgetBlocked && (!allowBackup || !routeState.primaryExhausted && !rateLimited) && next < pending.length) {
       const task = pending[next];
       // Reserve both in-flight jobs before submitting either, then charge only
       // accepted jobs. Retries reuse accepted UUIDs and completed audio pieces.
@@ -282,6 +309,11 @@ export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allo
       try {
         const blob = await synthesizeCloudLine(task.text,task.voice,signal,{
           jobs:task.jobs,
+          switchOnRateLimit:allowBackup,
+          beforeSubmit() {
+            if (allowBackup && rateLimited) throw rateLimited;
+            if (allowBackup && routeState.primaryExhausted) throw new VoiceQuotaError('TTS.ai 本次免费字符不足。');
+          },
           onSubmitted(length) {
             routeState.primaryCharacters += length;
             reserved -= length;
@@ -289,10 +321,14 @@ export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allo
           },
           onWait(waitMs) { if (!signal.aborted) progress(task,'tts.ai',waitMs ? 'waiting' : 'synthesize',waitMs); }
         });
-        publish(task,{blob,voiceProvider:'tts.ai'});
+        publish(task,{blob,voiceProvider:providerFor(task.jobs)});
       } catch (error) {
         if (error instanceof VoiceQuotaError) {
           routeState.primaryExhausted = true;
+          if (!allowBackup) failure ||= error;
+        } else if (error instanceof VoiceRateLimitError) {
+          routeState.primaryCooldownUntil = Math.max(routeState.primaryCooldownUntil || 0,error.retryAt);
+          rateLimited = error;
           if (!allowBackup) failure ||= error;
         } else failure ||= error;
       } finally {
@@ -310,11 +346,35 @@ export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allo
     if (clips.has(task.key)) continue;
     if (!allowBackup) throw new VoiceQuotaError('TTS.ai 本次免费字符不足。可以稍后再试，或允许备用服务继续配音。');
     if (signal.aborted) throw signal.reason || cancelled();
-    progress(task,'huggingface','synthesize');
-    const {synthesizeBackupLine} = await import('./backup-voice.js?v=14');
+    if (task.parts.some((part,i) => !task.jobs[i]?.blob && !task.jobs[i]?.uuid)) {
+      progress(task,'huggingface','switching',Math.max(0,(routeState.primaryCooldownUntil || 0) - Date.now()),
+        budgetBlocked ? 'budget' : routeState.primaryExhausted ? 'daily-quota' : 'rate-limit');
+    }
+    const {synthesizeBackupLine} = await import('./backup-voice.js?v=15');
     if (signal.aborted) throw signal.reason || cancelled();
-    const blob = await synthesizeBackupLine(task.text,task.voice,signal);
-    publish(task,{blob,voiceProvider:'huggingface'});
+    const parts = [];
+    for (const [i,part] of task.parts.entries()) {
+      if (signal.aborted) throw signal.reason || cancelled();
+      const job = task.jobs[i] || (task.jobs[i] = {});
+      if (!job.blob) {
+        if (job.uuid) {
+          // An accepted primary task may still be retrievable. Never submit its
+          // text to a second provider just because a later submission was limited.
+          progress(task,'tts.ai','synthesize');
+          job.blob = await synthesizeCloudLine(part,task.voice,signal,{jobs:[job]});
+          job.voiceProvider = 'tts.ai';
+        } else {
+          progress(task,'huggingface','synthesize');
+          const blob = await synthesizeBackupLine(part,task.voice,signal);
+          if (signal.aborted) throw signal.reason || cancelled();
+          job.blob = blob;
+          job.voiceProvider = 'huggingface';
+        }
+      }
+      parts.push(job.blob);
+    }
+    const blob = await joinClips(parts,signal);
+    publish(task,{blob,voiceProvider:providerFor(task.jobs)});
   }
   if (signal.aborted) throw signal.reason || cancelled();
   return ready;

@@ -1,5 +1,5 @@
 // Rendering the choices or the transcript never contacts the speech service.
-import {CLOUD_VOICES,cloudClipKey,renderCloudDialogue} from './cloud-voice.js?v=14';
+import {CLOUD_VOICES,cloudClipKey,renderCloudDialogue} from './cloud-voice.js?v=15';
 
 export function cloudPanel(onReady,backupAllowed) {
   const el = key => document.getElementById(key);
@@ -119,9 +119,12 @@ export function cloudPanel(onReady,backupAllowed) {
     const current = card;
     consent.checked = false;
     try {
-      const lines = await render(current.lines,(i,line,voice,provider) => {
-        const label = provider === 'huggingface' ? '备用 · ' + (voice === 'af_heart' ? 'Bella 女声' : 'Michael 男声') : labels[voice];
-        note('正在配第 ' + (i+1) + ' / ' + current.lines.length + ' 句 · ' + label + '。');
+      const lines = await render(current.lines,(i,line,voice,provider,status = {}) => {
+        const label = provider === 'mixed' ? '含备用 · ' + (voice === 'af_heart' ? 'Heart / Bella 女声' : 'Michael 男声')
+          : provider === 'huggingface' ? '备用 · ' + (voice === 'af_heart' ? 'Bella 女声' : 'Michael 男声') : labels[voice];
+        if (status.phase === 'switching') note((status.reason === 'rate-limit' ? '主服务生成限速' : '主服务配音额度不足') + '，正在切换备用自然配音。已完成的录音会保留。');
+        else if (status.phase === 'waiting') note('主服务生成限速，约 ' + Math.max(1,Math.ceil(status.waitMs / 1000)) + ' 秒后继续。');
+        else note('正在配第 ' + (i+1) + ' / ' + current.lines.length + ' 句 · ' + label + '。');
       });
       if (card === current) onReady(current,lines,new Map(cast));
     } catch (error) {

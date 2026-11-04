@@ -2,12 +2,12 @@ import {parseText} from './intake.js?v=14';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=8';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=7';
 import {planOnline, translateOnline, isReadableEnglish} from './online-translate.js?v=13';
-import {cloudPanel} from './cloud-panel.js?v=14';
-import {CLOUD_VOICES,renderCloudDialogue} from './cloud-voice.js?v=14';
+import {cloudPanel} from './cloud-panel.js?v=15';
+import {CLOUD_VOICES,renderCloudDialogue} from './cloud-voice.js?v=15';
 import {createLocalReader} from './native-speech.js';
 
-import {savePracticeCard, updatePracticePosition} from './library.js?v=12';
-import {practiceShelf} from './library-view.js?v=12';
+import {savePracticeCard, updatePracticePosition} from './library.js?v=15';
+import {practiceShelf} from './library-view.js?v=15';
 
 const id = key => document.getElementById(key);
 const source = id('source'), audio = id('audio');
@@ -59,12 +59,20 @@ function updateBackupControls() {
     container.querySelector('p').hidden = !backupAllowed;
   }
   id('reviewDisclosure').textContent = '点击下方配音按钮，将已准备好的英文和音色交给 TTS.ai。' +
-    (backupAllowed ? '额度不足时，由已启用的 Hugging Face 社区服务接续。' : '') + '未补的句子会跳过。';
+    (backupAllowed ? '额度不足或生成限速时，由已启用的 Hugging Face 社区服务接续。' : '') + '未补的句子会跳过。';
 }
 updateBackupControls();
 function serviceVoice(voice,provider) {
   if (provider === 'huggingface') return '备用配音 · ' + (voice === 'af_heart' ? 'Bella 女声' : 'Michael 男声');
+  if (provider === 'mixed') return '含备用配音 · ' + (voice === 'af_heart' ? 'Heart / Bella 女声' : 'Michael 男声');
   return voiceLabels[voice];
+}
+function voiceProgress(status,fallback) {
+  if (status.phase === 'switching') return (status.reason === 'rate-limit' ? '主服务生成限速' : '主服务配音额度不足') +
+    '，正在切换备用自然配音。已完成的录音会保留。';
+  if (status.phase === 'waiting') return '配音服务限制了生成频率，约 ' + Math.max(1,Math.ceil(status.waitMs / 1000)) +
+    ' 秒后继续。已完成的句子可以先听。';
+  return fallback;
 }
 function clearReview() {
   reviewLines = null;
@@ -105,7 +113,7 @@ function updateOnlinePlan() {
       ? '待译 ' + onlinePlan.count + ' 段正文（' + onlinePlan.characters + ' 字符）。' +
         (translationBackup.checked ? '优先用 MyMemory，额度用完时由 OPUS Translate 接译剩余正文。' : '由 MyMemory 翻译。') + '英文交给 TTS.ai 配音。'
       : '本次直接将需要配音的英文交给 TTS.ai。';
-    if (backupAllowed) id('onlineScope').textContent += '配音额度用完时可切换到备用声音。';
+    if (backupAllowed) id('onlineScope').textContent += '配音额度不足或生成限速时可切换到备用声音。';
     id('quickIntro').textContent = onlineIssue || '自动翻译并按角色配音。默认交替使用 Heart 女声和 Michael 男声，可在下方调整。';
     id('generate').textContent = reviewLines && needed ? '同意重试待译句并生成自然配音' : '同意并生成自然配音';
   }
@@ -648,11 +656,9 @@ async function startGeneration(bypassCache,useReady = false) {
       const ready = await renderCloudDialogue(lines,voices,onlineClips,onlineRequest.signal,(i,line,voice,provider,status = {}) => {
         if (!live()) return;
         const completed = status.completed ?? streamingCard.lines.filter(item => item.blob).length;
-        const message = status.phase === 'waiting'
-          ? '配音服务限制了生成频率，约 ' + Math.max(1,Math.ceil(status.waitMs / 1000)) + ' 秒后继续。已完成的句子可以先听。'
-          : '已完成 ' + completed + ' / ' + lines.length + ' 句 · ' + serviceVoice(voice,provider);
+        const message = voiceProgress(status,'已完成 ' + completed + ' / ' + lines.length + ' 句 · ' + serviceVoice(voice,provider));
         showJob('synthesize','online','生成自然配音 · 可边生成边听',message,{unit:'lines',loaded:completed,total:lines.length});
-        if (status.phase === 'waiting') note(id('streamStatus'),message);
+        if (status.phase === 'waiting' || status.phase === 'switching') note(id('streamStatus'),message);
       },{allowBackup,routeState:onlineRoute,onReady(i,line) {
         if (!live() || card !== streamingCard) return;
         card.lines[i] = line;
@@ -805,8 +811,8 @@ id('applyProof').onclick = async () => {
     id('applyProof').disabled = true;
     for (const field of fields) field.disabled = true;
     try {
-      const ready = await cloud.render(lines,(i,line,voice,provider) => {
-        note(id('proofNote'),'正在整理第 ' + (i+1) + ' / ' + lines.length + ' 句 · ' + serviceVoice(voice,provider));
+      const ready = await cloud.render(lines,(i,line,voice,provider,status = {}) => {
+        note(id('proofNote'),voiceProgress(status,'正在整理第 ' + (i+1) + ' / ' + lines.length + ' 句 · ' + serviceVoice(voice,provider)));
       });
       if (card !== target || !proof.open) return;
       openCard({title,lines:ready,voices,cloud:true,resumeIndex:active});
@@ -846,8 +852,8 @@ function openCard(next,keepCloudVoices = false) {
   if (textOnly && next.online) id('cloudPanel').open = true;
   id('cardTitle').textContent = next.title;
   id('cardMeta').textContent = (next.cloud ? 'Kokoro 在线配音 · ' : textOnly ? '英文已就绪 · ' : next.native ? '本机系统声音 · ' : next.demo ? 'Heart × Michael 双人试听 · ' : '已配音 · ') + next.lines.length + ' 段对白';
-  const backupCount = next.lines.filter(line => line.voiceProvider === 'huggingface').length;
-  if (backupCount) id('cardMeta').textContent += ' · ' + backupCount + ' 段使用 Hugging Face 备用配音';
+  const backupCount = next.lines.filter(line => ['huggingface','mixed'].includes(line.voiceProvider)).length;
+  if (backupCount) id('cardMeta').textContent += ' · ' + backupCount + ' 段含 Hugging Face 备用配音';
   id('player').hidden = false;
   id('cardActions').hidden = !!next.demo;
   id('practiceTitle').value = next.title;
@@ -891,8 +897,8 @@ function updateStreamingCard() {
   id('stopStreaming').hidden = !card.generating;
   id('backToGenerate').hidden = !!card.generating;
   id('cardMeta').textContent = 'Kokoro 在线配音 · ' + (unfinished ? '已完成 ' + count + ' / ' + total + ' 句' : total + ' 段对白');
-  const backupCount = card.lines.filter(line => line.voiceProvider === 'huggingface').length;
-  if (backupCount) id('cardMeta').textContent += ' · ' + backupCount + ' 段使用备用配音';
+  const backupCount = card.lines.filter(line => ['huggingface','mixed'].includes(line.voiceProvider)).length;
+  if (backupCount) id('cardMeta').textContent += ' · ' + backupCount + ' 段含备用配音';
   if (card.generating) note(id('streamStatus'),count ? '可以先播放已完成的句子，后面的会继续生成。' : '正在准备开头的录音，完成一句就能播放。');
   id('savePractice').disabled = !!unfinished;
   id('saveCard').disabled = !!unfinished;
