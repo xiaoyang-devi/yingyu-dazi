@@ -38,6 +38,14 @@ function parseMerged(value, add, skip, depth = 0) {
 function readNamedLines(raw, add) {
   const lines = raw.split('\n')
   const missing = () => fail('有消息缺少可确认的昵称。请把每条整理为「昵称：内容」后再粘贴。')
+  function field(line) {
+    const trimmed = line.trim()
+    if (URL_OR_CLOCK.test(trimmed) || BARE_TIME.test(trimmed)) return null
+    const match = /^\s*([^：:\n]{1,128})[：:](?!\/\/)(.*)$/u.exec(line)
+    // A clock embedded in a sentence is body text, even when it starts with words.
+    if (match && /\d{1,2}$/u.test(match[1]) && /^[0-5]\d(?:\D|$)/u.test(match[2])) return null
+    return match
+  }
   function header(i) {
     const line = lines[i].trim()
     if (!line || BARE_TIME.test(line) || URL_OR_CLOCK.test(line)) return null
@@ -52,7 +60,14 @@ function readNamedLines(raw, add) {
     if (!DATE.test(lines[j]?.trim() || '')) return null
     return {mode:marked?'marked':'stacked',name:marked?marked[1].trim():line,until:j}
   }
-  const mode = header(0)?.mode || 'colon'
+  const firstHeader = header(0)
+  if (lines.length === 1 && firstHeader?.mode === 'inline') return false
+  if (!firstHeader && !field(lines[0])) {
+    // Recognizable export headers still report incomplete or misplaced records.
+    if ((DATE.test(lines[0]) && lines.length > 1) || lines.some((_,i) => header(i))) missing()
+    return false
+  }
+  const mode = firstHeader?.mode || 'colon'
   let speaker = null, body = []
   function finish() { if (speaker !== null) add(speaker,body.join('\n')) }
   for (let i=0;i<lines.length;i++) {
@@ -65,16 +80,16 @@ function readNamedLines(raw, add) {
       finish(); speaker=native.name; body=[]; i=native.until; continue
     }
     if (mode==='marked' && LABEL.test(trimmed)) fail('昵称下面缺少完整日期和时间，请核对原文。')
-    const field = mode==='colon' && !indented && !URL_OR_CLOCK.test(trimmed) && !BARE_TIME.test(trimmed)
-      ? /^\s*([^：:\n]{1,128})[：:](?!\/\/)(.*)$/u.exec(line) : null
-    if (field) { finish(); speaker=field[1].trim(); body=[field[2]]; continue }
+    const named = mode==='colon' && !indented ? field(line) : null
+    if (named) { finish(); speaker=named[1].trim(); body=[named[2]]; continue }
     if (speaker===null || (mode!=='colon' && BARE_TIME.test(trimmed))) missing()
     body.push(line)
   }
   finish()
+  return true
 }
 
-export function parseText(input) {
+export function parseText(input,{singleMessage = false} = {}) {
   if (typeof input !== 'string') fail('请提供聊天文字。')
   if (input.length > MAX_TEXT || new TextEncoder().encode(input).length > MAX_TEXT) fail('聊天文字超过 2 MiB，请分段导入。')
   const raw = input.replace(/^\uFEFF/u, '').replace(/\r\n?/g, '\n').trim()
@@ -91,11 +106,15 @@ export function parseText(input) {
     count()
     messages.push({ speaker: who.trim(), text })
   }
-  if (raw[0] === '{' || raw[0] === '[' && /^\[\s*[\[{"\]]/.test(raw)) {
+  let plain = singleMessage
+  if (singleMessage) {
+    add('朗读',raw)
+  } else if (raw[0] === '{' || raw[0] === '[' && /^\[\s*[\[{"\]]/.test(raw)) {
     parseMerged(parseJSON(raw, '无法解析 JSON，请检查文件是否完整。'), add, skip)
-  } else {
-    readNamedLines(raw,add)
+  } else if (!readNamedLines(raw,add)) {
+    add('朗读',raw)
+    plain = true
   }
   if (!messages.length) fail('记录中没有可朗读的文字消息。')
-  return { messages, skipped }
+  return plain ? {messages,skipped,singleMessage:true} : {messages,skipped}
 }

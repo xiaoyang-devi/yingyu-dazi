@@ -10,8 +10,8 @@
   <meta name="apple-mobile-web-app-title" content="英语搭子">
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="./style.css?v=11">
-  <script type="module" src="./app.js?v=13"></script>
+  <link rel="stylesheet" href="./style.css?v=14">
+  <script type="module" src="./app.js?v=14"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -30,9 +30,10 @@
       <div class="intake-entry"><label class="file-pick"><span aria-hidden="true">↥</span> 导入微信 ZIP 或 TXT<input id="chatFile" type="file" accept=".zip,.txt,application/zip,application/x-zip-compressed,text/plain" aria-label="导入微信 ZIP 或 TXT"></label><span>或粘贴到下方</span><button type="button" class="plain" id="cancelFile" hidden>取消导入</button></div>
       <p id="fileStatus" class="small" role="status" aria-live="polite"></p>
       <div class="paste-heading"><label class="field-label" for="source">聊天文字</label><button type="button" id="formatHelp" aria-expanded="false" aria-controls="formatGuide">粘贴格式</button></div>
-      <p class="format-tip" id="formatGuide" hidden>可以每行写「昵称：消息」，也可以直接粘贴微信复制出来的三行格式（昵称、日期时间、正文）。</p>
+      <p class="format-tip" id="formatGuide" hidden>一句话或一段文字可直接粘贴，无需昵称。多人聊天可以写「昵称：消息」，也支持微信的昵称、日期时间、正文三行格式。若正文里的冒号被识别成昵称，可选择「作为一条消息朗读」。</p>
       <textarea id="source" rows="3" spellcheck="false" placeholder="甲：你带伞了吗？&#10;乙：带了，一起走吧。"></textarea>
       <div class="input-meta"><span id="materials">支持中文、英文和中英混合聊天</span><span id="characters">0 / 6,000 正文字</span></div>
+      <label class="awake-option"><input id="singleMessage" type="checkbox" autocomplete="off">作为一条消息朗读</label>
       <details id="range" hidden><summary><span>本次制作范围 <small id="rangeSummary"></small></span><span class="adjust">选择</span></summary>
         <div class="range-row"><label>从第 <input type="number" id="rangeFrom" min="1" step="1" inputmode="numeric" value="1"> 条</label><label>到第 <input type="number" id="rangeTo" min="1" step="1" inputmode="numeric" value="1"> 条</label><div class="range-actions"><button type="button" id="prevRange" class="plain">上一段</button><button type="button" id="nextRange" class="plain">下一段</button></div></div>
         <p id="rangeNote" class="small" role="status"></p><p id="rangePreview" class="small"></p>
@@ -81,6 +82,7 @@
     </section>
     <section class="work-card player" id="player" aria-labelledby="cardTitle" hidden>
       <div class="player-heading"><div class="section-head"><div class="kicker">02 <span></span> LISTEN</div><h2 id="cardTitle" tabindex="-1"></h2><p id="cardMeta" class="small"></p></div></div>
+      <div id="streamProgress" class="stream-progress" hidden><p id="streamStatus" class="small" role="status"></p><button type="button" class="plain" id="stopStreaming">停止生成</button><button type="button" class="plain" id="backToGenerate" hidden>回到制作台继续</button></div>
       <details id="proofPanel" class="cloud-panel" hidden>
         <summary><span>校对英文<small id="proofHint">按上下文修改译文</small></span><span class="adjust">编辑</span></summary>
         <div class="cloud-body"><p class="small" id="proofDisclosure">可以按上下文修改英文。重新配音时，TTS.ai 会收到需要新录音的英文台词和对应音色。</p>

@@ -37,16 +37,19 @@ function pause(ms, signal) {
 }
 
 // The free endpoint allows ten submissions per minute. Count submitted attempts even if cancelled.
-async function waitForSubmission(signal) {
+async function waitForSubmission(signal, onWait) {
   for (;;) {
     if (signal.aborted) throw signal.reason || cancelled();
     const now = performance.now();
     while (recentSubmissions.length && now - recentSubmissions[0] >= 60000) recentSubmissions.shift();
     if (recentSubmissions.length < 10) {
       recentSubmissions.push(now);
+      onWait(0);
       return;
     }
-    await pause(Math.ceil(60000 - (now - recentSubmissions[0])), signal);
+    const waitMs = Math.ceil(60000 - (now - recentSubmissions[0]));
+    onWait(waitMs);
+    await pause(waitMs, signal);
   }
 }
 
@@ -59,7 +62,11 @@ async function request(url, options, signal) {
     }
     throw Error('TTS.ai 暂时限制请求。请稍后重试，已完成的录音会保留。');
   }
-  if (!res.ok) throw Error('在线配音服务暂时不可用。可稍后重试，或在制作台选择纯本机配音。');
+  if (!res.ok) {
+    const error = Error('在线配音服务暂时不可用。可稍后重试，或在制作台选择纯本机配音。');
+    error.status = res.status;
+    throw error;
+  }
   return res;
 }
 
@@ -135,17 +142,21 @@ export async function readWave(res) {
   return trimQuietEdges(v, blob);
 }
 
-async function generatePart(text, voice, signal) {
-  const created = await json(await request(api + '/v1/tts/', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model:'kokoro', text, voice, language:'en', format:'wav', speed:1})
-  }, signal));
-  if (typeof created?.uuid !== 'string' || !/^[a-z\d-]{1,80}$/i.test(created.uuid)) {
-    throw Error('在线配音未返回任务编号。');
+async function generatePart(text, voice, signal, job, onSubmitted) {
+  if (!job.uuid) {
+    const created = await json(await request(api + '/v1/tts/', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'kokoro', text, voice, language:'en', format:'wav', speed:1})
+    }, signal));
+    if (typeof created?.uuid !== 'string' || !/^[a-z\d-]{1,80}$/i.test(created.uuid)) {
+      throw Error('在线配音未返回任务编号。');
+    }
+    job.uuid = created.uuid;
+    onSubmitted(Array.from(text).length);
   }
-  const poll = api + '/v1/speech/results/?uuid=' + encodeURIComponent(created.uuid);
+  const poll = api + '/v1/speech/results/?uuid=' + encodeURIComponent(job.uuid);
   for (;;) {
-    await pause(1300, signal);
+    await pause(1000, signal);
     const result = await json(await request(poll, {}, signal));
     if (result?.status === 'completed') {
       if (typeof result.result_url !== 'string') throw invalidAudio();
@@ -155,12 +166,14 @@ async function generatePart(text, voice, signal) {
       return readWave(await request(source.href, {}, signal));
     }
     if (!['queued','pending','processing','running','started','in_progress'].includes(result?.status)) {
+      // A failed remote job needs a new submission on an explicit retry.
+      delete job.uuid;
       throw Error('在线配音未能完成这句英文。可稍后重试，或在制作台选择纯本机配音。');
     }
   }
 }
 
-export async function synthesizeCloudLine(text, voice, signal) {
+export async function synthesizeCloudLine(text, voice, signal, {jobs = [],onSubmitted = () => {},onWait = () => {}} = {}) {
   if (signal?.aborted) throw cancelled();
   if (!CLOUD_VOICES.includes(voice)) throw Error('请选择在线配音提供的音色。');
   if (typeof text !== 'string') throw Error('这句缺少英文台词。');
@@ -171,10 +184,22 @@ export async function synthesizeCloudLine(text, voice, signal) {
   signal?.addEventListener('abort', abort, {once:true});
   const clips = [];
   try {
-    for (const part of parts) {
-      await waitForSubmission(controller.signal);
+    for (const [i,part] of parts.entries()) {
+      if (controller.signal.aborted) throw controller.signal.reason || cancelled();
+      const job = jobs[i] || (jobs[i] = {});
+      if (job.blob) { clips.push(job.blob); continue; }
+      if (!job.uuid) await waitForSubmission(controller.signal,onWait);
+      if (controller.signal.aborted) throw controller.signal.reason || cancelled();
       const timer = setTimeout(() => controller.abort(Error('在线配音响应超时。请检查网络后重试，或在制作台选择纯本机配音。')), 60000);
-      try { clips.push(await generatePart(part, voice, controller.signal)); }
+      try {
+        const blob = await generatePart(part, voice, controller.signal,job,onSubmitted);
+        if (controller.signal.aborted) throw controller.signal.reason || cancelled();
+        job.blob = blob;
+        clips.push(blob);
+      } catch (error) {
+        if ([404,410].includes(error.status)) delete job.uuid;
+        throw error;
+      }
       finally { clearTimeout(timer); }
     }
     if (controller.signal.aborted) throw controller.signal.reason || cancelled();
@@ -196,63 +221,101 @@ export const cloudClipKey = (voice,text) => JSON.stringify([voice,text]);
 
 // Only call after the user approves this selection. Cache by exact text AND voice
 // so retries, repeated sentences and edits reuse matching audio.
-export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allowBackup = false,routeState = {}} = {}) {
-  const pending = new Set();
-  let characters = 0;
-  for (const line of lines) {
-    const voice = voices.get(line.speaker);
-    if (!CLOUD_VOICES.includes(voice)) throw Error('请选择有效的自然配音音色。');
-    const key = cloudClipKey(voice,line.en);
-    if (clips.has(key) || pending.has(key)) continue;
-    pending.add(key);
-    characters += Array.from(line.en).length;
-  }
-  if (characters > 5000 && !allowBackup) throw Error('本次待配音的英文超过 5,000 字符，请缩短选区，或允许使用备用配音。');
+export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allowBackup = false,routeState = {},onReady = () => {}} = {}) {
+  if (signal.aborted) throw signal.reason || cancelled();
   const quotaDay = new Date().toISOString().slice(0,10);
   if (routeState.day !== quotaDay) {
     routeState.day = quotaDay;
     routeState.primaryCharacters = 0;
     routeState.primaryExhausted = false;
   }
-  const ready = [];
-  for (const [i,line] of lines.entries()) {
-    if (signal.aborted) throw signal.reason || cancelled();
-    const voice = voices.get(line.speaker), key = cloudClipKey(voice,line.en);
-    let clip = clips.get(key);
-    if (clip instanceof Blob) clip = {blob:clip,voiceProvider:'tts.ai'};
-    if (clip) {
-      onLine(i,line,voice,clip.voiceProvider);
-    } else {
-      const length = Array.from(line.en).length;
-      // Never initiate a primary request that would exceed this job's 5,000-character budget.
-      const overBudget = routeState.primaryCharacters + length > 5000;
-      if ((!allowBackup || !routeState.primaryExhausted) && !overBudget) {
-        onLine(i,line,voice,'tts.ai');
-        try {
-          const blob = await synthesizeCloudLine(line.en,voice,signal);
-          clip = {blob,voiceProvider:'tts.ai'};
-          routeState.primaryCharacters += length;
-        } catch (error) {
-          if (!(error instanceof VoiceQuotaError) || signal.aborted) throw error;
-          routeState.primaryExhausted = true;
-          if (!allowBackup) throw error;
-        }
-      }
-      if (!clip) {
-        if (!allowBackup) throw new VoiceQuotaError('TTS.ai 本次免费字符不足。可以稍后再试，或允许备用服务继续配音。');
-        if (signal.aborted) throw signal.reason || cancelled();
-        onLine(i,line,voice,'huggingface');
-        const {synthesizeBackupLine} = await import('./backup-voice.js?v=12');
-        if (signal.aborted) throw signal.reason || cancelled();
-        const blob = await synthesizeBackupLine(line.en,voice,signal);
-        clip = {blob,voiceProvider:'huggingface'};
-        // Keep this job on the backup even when the next line happens to fit the remaining budget.
-        if (overBudget) routeState.primaryExhausted = true;
-      }
-      if (signal.aborted) throw signal.reason || cancelled();
-      clips.set(key,clip);
-    }
-    ready.push({...line,...clip});
+  const jobs = routeState.primaryJobs || (routeState.primaryJobs = new Map());
+  const tasks = new Map(), ready = new Array(lines.length);
+  let characters = 0, completed = 0;
+  function progress(task,provider,phase,waitMs) {
+    const i = task.indices[0];
+    onLine(i,lines[i],task.voice,provider,{completed,total:lines.length,phase,waitMs});
   }
+  function publish(task,clip) {
+    if (signal.aborted) return;
+    clips.set(task.key,clip);
+    for (const i of task.indices) {
+      if (signal.aborted) return;
+      ready[i] = {...lines[i],...clip};
+      completed++;
+      onReady(i,ready[i]);
+    }
+    if (!signal.aborted) progress(task,clip.voiceProvider,'ready');
+  }
+  for (const [i,line] of lines.entries()) {
+    const voice = voices.get(line.speaker), key = cloudClipKey(voice,line.en);
+    if (!CLOUD_VOICES.includes(voice)) throw Error('请选择有效的自然配音音色。');
+    if (tasks.has(key)) { tasks.get(key).indices.push(i); continue; }
+    const parts = splitLine(line.en), partJobs = jobs.get(key) || [];
+    jobs.set(key,partJobs);
+    const needed = parts.reduce((sum,part,i) => sum + (partJobs[i]?.uuid || partJobs[i]?.blob ? 0 : Array.from(part).length),0);
+    tasks.set(key,{key,voice,text:line.en,indices:[i],jobs:partJobs,needed});
+    if (!clips.has(key)) characters += needed;
+  }
+  if (characters > 5000 && !allowBackup) throw Error('本次待配音的英文超过 5,000 字符，请缩短选区，或允许使用备用配音。');
+  const pending = [];
+  for (const task of tasks.values()) {
+    let clip = clips.get(task.key);
+    if (clip instanceof Blob) clip = {blob:clip,voiceProvider:'tts.ai'};
+    if (clip) publish(task,clip);
+    else pending.push(task);
+  }
+  let next = 0, reserved = 0, failure = null, budgetBlocked = false;
+  async function primaryWorker() {
+    while (!signal.aborted && !failure && !budgetBlocked && (!allowBackup || !routeState.primaryExhausted) && next < pending.length) {
+      const task = pending[next];
+      // Reserve both in-flight jobs before submitting either, then charge only
+      // accepted jobs. Retries reuse accepted UUIDs and completed audio pieces.
+      if (routeState.primaryCharacters + reserved + task.needed > 5000) {
+        budgetBlocked = true;
+        return;
+      }
+      next++;
+      let reservation = task.needed;
+      reserved += reservation;
+      progress(task,'tts.ai','synthesize');
+      try {
+        const blob = await synthesizeCloudLine(task.text,task.voice,signal,{
+          jobs:task.jobs,
+          onSubmitted(length) {
+            routeState.primaryCharacters += length;
+            reserved -= length;
+            reservation -= length;
+          },
+          onWait(waitMs) { if (!signal.aborted) progress(task,'tts.ai',waitMs ? 'waiting' : 'synthesize',waitMs); }
+        });
+        publish(task,{blob,voiceProvider:'tts.ai'});
+      } catch (error) {
+        if (error instanceof VoiceQuotaError) {
+          routeState.primaryExhausted = true;
+          if (!allowBackup) failure ||= error;
+        } else failure ||= error;
+      } finally {
+        reserved -= reservation;
+      }
+    }
+  }
+  // Free TTS.ai permits two concurrent jobs. Keep the second slot useful while
+  // the first is polling, without increasing the ten-submission rolling limit.
+  await Promise.all(Array.from({length:Math.min(2,pending.length)},primaryWorker));
+  if (signal.aborted) throw signal.reason || cancelled();
+  if (failure) throw failure;
+  if (budgetBlocked) routeState.primaryExhausted = true;
+  for (const task of pending) {
+    if (clips.has(task.key)) continue;
+    if (!allowBackup) throw new VoiceQuotaError('TTS.ai 本次免费字符不足。可以稍后再试，或允许备用服务继续配音。');
+    if (signal.aborted) throw signal.reason || cancelled();
+    progress(task,'huggingface','synthesize');
+    const {synthesizeBackupLine} = await import('./backup-voice.js?v=14');
+    if (signal.aborted) throw signal.reason || cancelled();
+    const blob = await synthesizeBackupLine(task.text,task.voice,signal);
+    publish(task,{blob,voiceProvider:'huggingface'});
+  }
+  if (signal.aborted) throw signal.reason || cancelled();
   return ready;
 }

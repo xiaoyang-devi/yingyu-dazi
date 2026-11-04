@@ -1,9 +1,9 @@
-import {parseText} from './intake.js?v=4';
+import {parseText} from './intake.js?v=14';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=8';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=7';
 import {planOnline, translateOnline, isReadableEnglish} from './online-translate.js?v=13';
-import {cloudPanel} from './cloud-panel.js?v=12';
-import {CLOUD_VOICES,renderCloudDialogue} from './cloud-voice.js?v=12';
+import {cloudPanel} from './cloud-panel.js?v=14';
+import {CLOUD_VOICES,renderCloudDialogue} from './cloud-voice.js?v=14';
 import {createLocalReader} from './native-speech.js';
 
 import {savePracticeCard, updatePracticePosition} from './library.js?v=12';
@@ -113,7 +113,7 @@ function updateOnlinePlan() {
 }
 id('sendPreview').ontoggle = previewOnline;
 let parsed = null, parseIssue = '', castNames = [], jobVersion = 0, working = false;
-let card = null, active = 0, playbackVersion = 0, openingAudio = false, endedAll = false;
+let card = null, active = 0, playbackVersion = 0, openingAudio = false, endedAll = false, waitingForAudio = false;
 let cardVersion = 0, demoVersion = 0, saving = false;
 
 function note(node, message, error = false) {
@@ -341,7 +341,7 @@ function resetSource(raw, known) {
   corpusError = '';
   prefix = [0];
   if (raw.trim()) {
-    try { corpus = known || parseText(raw); } catch (e) { corpusError = e.message; }
+    try { corpus = known || parseText(raw,{singleMessage:id('singleMessage').checked}); } catch (e) { corpusError = e.message; }
   }
   const total = corpus?.messages.length || 0;
   if (corpus) {
@@ -354,7 +354,7 @@ function resetSource(raw, known) {
   id('range').open = oversized;
   if (corpus) corpus.people = speakerNames(corpus.messages);
   id('materials').textContent = corpus
-    ? corpus.people.length + ' 位发言人 · ' + total + ' 条文字' + (corpus.skipped ? ' · 已跳过 ' + corpus.skipped + ' 条' : '')
+    ? (corpus.singleMessage ? '单条文字 · 无需昵称' : corpus.people.length + ' 位发言人 · ' + total + ' 条文字') + (corpus.skipped ? ' · 已跳过 ' + corpus.skipped + ' 条' : '')
     : raw.trim() ? '请核对昵称、日期时间与正文的排版' : '支持中文、英文和中英混合聊天';
 }
 function excerpt(message) {
@@ -391,7 +391,7 @@ function scan() {
   id('roles').hidden = !names.length;
   id('peopleCount').textContent = names.length + ' 位';
   const count = onlineMode() ? CLOUD_VOICES.length : LOCAL_VOICES.length;
-  id('roleHint').textContent = names.length > count
+  id('roleHint').textContent = names.length === 1 ? '可以为这条文字选择女声或男声。' : names.length > count
     ? '可选 ' + count + ' 种声音，超过这个人数时会共用部分声音。' : '按发言顺序分配声音，可为每个人重新选择。';
 }
 function setReading(value) {
@@ -422,6 +422,7 @@ id('chatFile').onchange = async event => {
     if (ticket !== importTicket) return;
     // Validate first so a damaged archive never replaces a usable draft.
     const result = parseText(raw);
+    id('singleMessage').checked = false;
     source.value = raw;
     cachedTranslation = null;
     resetSource(source.value,result);
@@ -469,6 +470,14 @@ source.addEventListener('input', () => {
 source.addEventListener('blur', () => {
   if (parseIssue && source.value.trim()) note(id('progress'),parseIssue,true);
 });
+id('singleMessage').onchange = () => {
+  cancelJob();
+  cancelImport();
+  cachedTranslation = null;
+  resetSource(source.value);
+  resetJobProgress();
+  scan();
+};
 
 function setBusy(value) {
   working = value;
@@ -480,6 +489,7 @@ function setBusy(value) {
   if (reviewLines) updateReviewSummary();
   if (!value) clearWaitHint();
   source.readOnly = value;
+  id('singleMessage').disabled = value;
   id('generate').disabled = id('preparePack').disabled = value || readingFile;
   id('libraryTab').disabled = value;
   if (value) foregroundMessage();
@@ -497,6 +507,7 @@ function cancelJob() {
   jobVersion++;
   onlineRequest?.abort();
   onlineRequest = null;
+  if (card?.generating) stopStreaming(card,'已停止生成，完成的句子仍可播放。');
   resetJobProgress();
   cancelLocalTranslation();
   releaseLocalVoice();
@@ -567,6 +578,7 @@ function showReview(lines) {
   id('reviewHeading').focus();
 }
 function dialogueTitle(messages) {
+  if (corpus?.singleMessage) return '单条文字听力';
   const people = speakerNames(messages);
   return people.slice(0,2).join('、') + (people.length > 2 ? '等' : '') + '的对话';
 }
@@ -603,6 +615,7 @@ async function startGeneration(bypassCache,useReady = false) {
   if (online) onlineRequest = new AbortController();
   setBusy(true);
   showJob('prepare','prepare',online ? '准备自然配音' : '准备制作','正在检查所选消息、角色与英语台词。');
+  let streamingCard = null;
   try {
     const reuse = !online && cachedTranslation?.original === original && cachedTranslation.selection === selection;
     if (reuse) {
@@ -629,16 +642,29 @@ async function startGeneration(bypassCache,useReady = false) {
     const partial = useReady && lines.length < reviewLines.length;
     const title = dialogueTitle(input) + (partial ? '（节选 ' + lines.length + '/' + reviewLines.length + ' 句）' : '');
     if (online) {
-      const ready = await renderCloudDialogue(lines,voices,onlineClips,onlineRequest.signal,(i,line,voice,provider) => {
-        if (live()) showJob('synthesize','online','逐句生成自然配音',
-          '第 ' + (i+1) + ' / ' + lines.length + ' 句 · ' + line.speaker + ' · ' + serviceVoice(voice,provider),
-          {unit:'lines',loaded:i,total:lines.length});
-      },{allowBackup,routeState:onlineRoute});
+      openCard({title,lines:lines.map(line => ({...line})),voices,cloud:true,generating:true,incomplete:true});
+      streamingCard = card;
+      let revealed = false;
+      const ready = await renderCloudDialogue(lines,voices,onlineClips,onlineRequest.signal,(i,line,voice,provider,status = {}) => {
+        if (!live()) return;
+        const completed = status.completed ?? streamingCard.lines.filter(item => item.blob).length;
+        const message = status.phase === 'waiting'
+          ? '配音服务限制了生成频率，约 ' + Math.max(1,Math.ceil(status.waitMs / 1000)) + ' 秒后继续。已完成的句子可以先听。'
+          : '已完成 ' + completed + ' / ' + lines.length + ' 句 · ' + serviceVoice(voice,provider);
+        showJob('synthesize','online','生成自然配音 · 可边生成边听',message,{unit:'lines',loaded:completed,total:lines.length});
+        if (status.phase === 'waiting') note(id('streamStatus'),message);
+      },{allowBackup,routeState:onlineRoute,onReady(i,line) {
+        if (!live() || card !== streamingCard) return;
+        card.lines[i] = line;
+        card.urls[i] = URL.createObjectURL(line.blob);
+        updateStreamingCard();
+        if (!revealed) { revealed = true; showPlayer(); }
+        if (waitingForAudio && active === i) playLine(i,true,true);
+      }});
       if (!live()) return;
       if (!partial) clearReview();
-      openCard({title,lines:ready,voices,cloud:true});
+      stopStreaming(streamingCard);
       finishJob('已生成 ' + ready.length + ' 句自然配音，点「播放」即可跟读。' + (partial ? '待译原句仍在制作台。' : ''));
-      showPlayer();
       return;
     }
     clearReview();
@@ -673,7 +699,10 @@ async function startGeneration(bypassCache,useReady = false) {
         (online ? ' 原文、已完成的翻译和配音留在本页，可重试剩余部分。' : voiceFailed ? ' 译文已保留在本页，可以重试配音。' : ' 原文仍在，点生成可重试。'),true);
     }
   } finally {
-    if (live()) { onlineRequest = null; releaseLocalVoice(); setBusy(false); }
+    if (live()) {
+      if (streamingCard?.generating) stopStreaming(streamingCard,'后续生成未完成，可回到制作台重试剩余句子。');
+      onlineRequest = null; releaseLocalVoice(); setBusy(false);
+    }
   }
 }
 
@@ -719,12 +748,13 @@ id('demo').onclick = async () => {
 function showPlayer() { id('player').scrollIntoView({block:'start',behavior:'auto'}); }
 function clearAudio() {
   reader.stop();
+  waitingForAudio = false;
   playbackVersion++;
   openingAudio = false;
   audio.pause();
   audio.removeAttribute('src');
   audio.load();
-  if (card) for (const url of card.urls) if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+  if (card) for (const url of card.urls) if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
 }
 const cloud = cloudPanel((previous,lines,voices) => {
   if (card !== previous) return;
@@ -802,7 +832,7 @@ function openCard(next,keepCloudVoices = false) {
   endedAll = false;
   id('repeatLine').checked = false;
   card = {...next,urls:next.native ? [] : next.lines.map(line => line.blob ? URL.createObjectURL(line.blob) : line.audio)};
-  proof.hidden = !(next.native && next.online || next.cloud && next.voices?.size);
+  proof.hidden = next.incomplete || !(next.native && next.online || next.cloud && next.voices?.size);
   id('proofBackupSettings').hidden = !next.cloud;
   id('proofDisclosure').textContent = next.cloud ? '重新配音时，TTS.ai 会收到需要新录音的英文和对应音色。未修改的录音直接复用。'
     : '此旧版卡片使用本机朗读。修改英文只会更新本机台词。';
@@ -811,7 +841,7 @@ function openCard(next,keepCloudVoices = false) {
   id('proofHint').textContent = shortCount ? shortCount + ' 句短回复建议结合上下文核对' : '按上下文修改译文';
   proof.open = false;
   id('proofRows').replaceChildren();
-  cloud.open(card,keepCloudVoices);
+  cloud.open(next.incomplete ? null : card,keepCloudVoices);
   const textOnly = next.native && !next.voices?.size;
   if (textOnly && next.online) id('cloudPanel').open = true;
   id('cardTitle').textContent = next.title;
@@ -822,12 +852,12 @@ function openCard(next,keepCloudVoices = false) {
   id('cardActions').hidden = !!next.demo;
   id('practiceTitle').value = next.title;
   id('practiceTitle').readOnly = !!next.libraryId;
-  id('savePractice').disabled = !!next.libraryId || textOnly;
+  id('savePractice').disabled = !!next.libraryId || textOnly || !!next.incomplete;
   id('savePractice').textContent = next.libraryId ? '已存入我的练习' : '存入我的练习';
   note(id('librarySaveNote'),'');
   card.lastPosition = active;
   id('saveCard').hidden = !!(next.demo || next.native);
-  id('saveCard').disabled = false;
+  id('saveCard').disabled = !!next.incomplete;
   id('saveNote').hidden = true;
   note(id('playerNote'),textOnly ? '设备没有本地英语声音，生成自然配音后即可播放和保存。' : '点任意一句从这里听。');
   id('play').disabled = !!textOnly;
@@ -847,9 +877,52 @@ function openCard(next,keepCloudVoices = false) {
     return button;
   });
   id('lines').replaceChildren(...nodes);
+  id('streamProgress').hidden = !next.generating && !next.incomplete;
+  if (next.generating || next.incomplete) updateStreamingCard();
   highlight(false);
   paintTransport();
 }
+function updateStreamingCard() {
+  if (!card?.cloud) return;
+  const count = card.urls.filter(Boolean).length, total = card.lines.length;
+  card.incomplete = count < total;
+  const unfinished = card.incomplete || card.generating;
+  id('streamProgress').hidden = !unfinished;
+  id('stopStreaming').hidden = !card.generating;
+  id('backToGenerate').hidden = !!card.generating;
+  id('cardMeta').textContent = 'Kokoro 在线配音 · ' + (unfinished ? '已完成 ' + count + ' / ' + total + ' 句' : total + ' 段对白');
+  const backupCount = card.lines.filter(line => line.voiceProvider === 'huggingface').length;
+  if (backupCount) id('cardMeta').textContent += ' · ' + backupCount + ' 段使用备用配音';
+  if (card.generating) note(id('streamStatus'),count ? '可以先播放已完成的句子，后面的会继续生成。' : '正在准备开头的录音，完成一句就能播放。');
+  id('savePractice').disabled = !!unfinished;
+  id('saveCard').disabled = !!unfinished;
+  proof.hidden = !!unfinished;
+  for (const [i,row] of [...id('lines').children].entries()) {
+    row.disabled = !card.urls[i];
+    let state = row.querySelector('.line-state');
+    if (row.disabled) {
+      if (!state) { state = document.createElement('small'); state.className = 'line-state'; row.append(state); }
+      state.textContent = card.generating ? '等待配音' : '尚未生成';
+    } else state?.remove();
+  }
+  paintTransport();
+}
+function stopStreaming(target,message = '') {
+  target.generating = false;
+  if (card !== target) return;
+  if (waitingForAudio && !card.urls[active]) {
+    waitingForAudio = false;
+    note(id('playerNote'),'这句尚未生成，可以先听其他已完成的句子。');
+  }
+  updateStreamingCard();
+  if (message && target.incomplete) note(id('streamStatus'),message);
+  if (!target.incomplete) cloud.open(target);
+}
+id('stopStreaming').onclick = cancelJob;
+id('backToGenerate').onclick = () => {
+  id('editor').scrollIntoView({block:'start',behavior:'auto'});
+  id('generate').focus({preventScroll:true});
+};
 function highlight(scroll) {
   if (!card) return;
   if (card.libraryId && active !== card.lastPosition) {
@@ -876,8 +949,9 @@ function highlight(scroll) {
 function paintTransport() {
   if (!card) return;
   const count = card.lines.length;
-  const running = card.native ? reader.state === 'playing' : openingAudio || !audio.paused && !audio.ended;
-  id('play').textContent = running ? 'Ⅱ 暂停' : endedAll ? '↻ 重听' : '▷ 播放';
+  const running = card.native ? reader.state === 'playing' : waitingForAudio || openingAudio || !audio.paused && !audio.ended;
+  id('play').disabled = card.native ? !card.voices?.size : !card.urls[active] && !waitingForAudio;
+  id('play').textContent = waitingForAudio ? 'Ⅱ 暂停等待' : running ? 'Ⅱ 暂停' : endedAll ? '↻ 重听' : '▷ 播放';
   id('prevLine').disabled = active === 0;
   id('nextLine').disabled = active === count-1;
   id('position').textContent = pad(active+1) + ' / ' + pad(count);
@@ -887,6 +961,7 @@ function paintTransport() {
 }
 async function playLine(index, restart, scroll) {
   if (!card?.lines[index]) return;
+  waitingForAudio = false;
   if (card.native) {
     active = index;
     endedAll = false;
@@ -903,6 +978,15 @@ async function playLine(index, restart, scroll) {
   const token = ++playbackVersion;
   active = index;
   endedAll = false;
+  if (!card.urls[index]) {
+    openingAudio = false;
+    audio.pause();
+    waitingForAudio = !!card.generating;
+    note(id('playerNote'),waitingForAudio ? '正在等这一句的录音，就绪后继续播放。' : '这句尚未生成，请回到制作台继续。');
+    highlight(scroll);
+    paintTransport();
+    return;
+  }
   openingAudio = true;
   if (audio.getAttribute('src') !== card.urls[index]) audio.src = card.urls[index];
   else if (restart) { try { audio.currentTime = 0; } catch {} }
@@ -927,8 +1011,8 @@ id('play').onclick = () => {
     } catch (e) { reader.stop(); note(id('playerNote'),e.message,true); paintTransport(); }
     return;
   }
-  if (openingAudio || !audio.paused && !audio.ended) {
-    playbackVersion++; openingAudio = false; audio.pause(); paintTransport();
+  if (waitingForAudio || openingAudio || !audio.paused && !audio.ended) {
+    playbackVersion++; waitingForAudio = false; openingAudio = false; audio.pause(); paintTransport();
   } else playLine(endedAll ? 0 : active,endedAll,false);
 };
 function advance() {
@@ -956,7 +1040,7 @@ id('rate').onchange = () => {
 id('showChinese').onchange = () => id('lines').classList.toggle('hide-zh',!id('showChinese').checked);
 id('follow').onchange = () => { if (id('follow').checked && (reader.state === 'playing' || !audio.paused)) highlight(true); };
 id('saveCard').onclick = async () => {
-  if (!card || card.demo || card.native || saving) return;
+  if (!card || card.demo || card.native || card.incomplete || card.generating || saving) return;
   const target = card, version = cardVersion;
   saving = true;
   id('saveCard').disabled = true;
@@ -977,7 +1061,7 @@ id('prevLine').onclick = () => playLine(active-1,true,true);
 id('nextLine').onclick = () => playLine(active+1,true,true);
 
 id('savePractice').onclick = async () => {
-  if (!card || card.demo || card.libraryId || id('savePractice').disabled) return;
+  if (!card || card.demo || card.incomplete || card.generating || card.libraryId || id('savePractice').disabled) return;
   const target = card;
   target.title = id('practiceTitle').value.trim() || id('cardTitle').textContent;
   id('practiceTitle').value = id('cardTitle').textContent = target.title;

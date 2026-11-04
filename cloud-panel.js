@@ -1,5 +1,5 @@
 // Rendering the choices or the transcript never contacts the speech service.
-import {CLOUD_VOICES,cloudClipKey,renderCloudDialogue} from './cloud-voice.js?v=12';
+import {CLOUD_VOICES,cloudClipKey,renderCloudDialogue} from './cloud-voice.js?v=14';
 
 export function cloudPanel(onReady,backupAllowed) {
   const el = key => document.getElementById(key);
