@@ -1,7 +1,7 @@
 // Rendering the choices or the transcript never contacts the speech service.
-import {CLOUD_VOICES,cloudClipKey,renderCloudDialogue} from './cloud-voice.js?v=15';
+import {CLOUD_VOICES,cloudClipKey,renderCloudDialogue} from './cloud-voice.js?v=16';
 
-export function cloudPanel(onReady,backupAllowed) {
+export function cloudPanel(onReady,backupAllowed,secondaryAllowed = () => false) {
   const el = key => document.getElementById(key);
   const panel = el('cloudPanel'), consent = el('cloudConsent'), generate = el('cloudGenerate');
   const labels = {af_heart:'Heart · 女声',am_michael:'Michael · 男声'};
@@ -15,7 +15,7 @@ export function cloudPanel(onReady,backupAllowed) {
   function controls() {
     const busy = Boolean(request);
     consent.disabled = el('cloudSwap').disabled = busy;
-    el('proofBackup').disabled = el('legacyBackup').disabled = el('allowBackup').disabled = busy;
+    for (const input of document.querySelectorAll('[data-backup-control] input')) input.disabled = busy;
     generate.disabled = busy || !consent.checked;
     el('cloudCancel').hidden = !busy;
     for (const select of el('cloudCast').querySelectorAll('select')) select.disabled = busy;
@@ -109,7 +109,7 @@ export function cloudPanel(onReady,backupAllowed) {
     request = job;
     controls();
     try {
-      return await renderCloudDialogue(lines,cast,clips,job.signal,onLine,{allowBackup:backupAllowed(),routeState});
+      return await renderCloudDialogue(lines,cast,clips,job.signal,onLine,{allowBackup:backupAllowed(),allowSecondary:secondaryAllowed(),routeState});
     } finally {
       if (request === job) { request = null; controls(); }
     }
@@ -120,9 +120,11 @@ export function cloudPanel(onReady,backupAllowed) {
     consent.checked = false;
     try {
       const lines = await render(current.lines,(i,line,voice,provider,status = {}) => {
-        const label = provider === 'mixed' ? '含备用 · ' + (voice === 'af_heart' ? 'Heart / Bella 女声' : 'Michael 男声')
+        const label = provider === 'mixed' ? '含多来源配音 · ' + (voice === 'af_heart' ? '自然女声' : '自然男声')
+          : provider === 'huggingface-secondary' ? '第二备用 · ' + (voice === 'af_heart' ? 'Heart 女声' : 'Michael 男声')
           : provider === 'huggingface' ? '备用 · ' + (voice === 'af_heart' ? 'Bella 女声' : 'Michael 男声') : labels[voice];
-        if (status.phase === 'switching') note((status.reason === 'rate-limit' ? '主服务生成限速' : '主服务配音额度不足') + '，正在切换备用自然配音。已完成的录音会保留。');
+        if (status.phase === 'switching' && status.reason?.startsWith('backup-')) note((status.reason === 'backup-timeout' ? '第一备用等待结果超过 30 秒' : '第一备用服务繁忙') + '，正在切换第二备用自然配音。');
+        else if (status.phase === 'switching') note((status.reason === 'rate-limit' ? '主服务生成限速' : '主服务配音额度不足') + '，正在切换备用自然配音。已完成的录音会保留。');
         else if (status.phase === 'waiting') note('主服务生成限速，约 ' + Math.max(1,Math.ceil(status.waitMs / 1000)) + ' 秒后继续。');
         else note('正在配第 ' + (i+1) + ' / ' + current.lines.length + ' 句 · ' + label + '。');
       });

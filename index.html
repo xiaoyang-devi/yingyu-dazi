@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: https://api.mymemory.translated.net/get https://api.tts.ai/v1/ https://cdn.tts.ai https://kinabraytan-kokoro-tts-server.hf.space/gradio_api/ https://helsinki-nlp-opus-translate.hf.space/call/translate https://helsinki-nlp-opus-translate.hf.space/call/translate/; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: https://api.mymemory.translated.net/get https://api.tts.ai/v1/ https://cdn.tts.ai https://kinabraytan-kokoro-tts-server.hf.space/gradio_api/ https://pendrokar-kokoro-tts.hf.space/gradio_api/ https://helsinki-nlp-opus-translate.hf.space/call/translate https://helsinki-nlp-opus-translate.hf.space/call/translate/; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f5f3eb">
   <meta name="mobile-web-app-capable" content="yes">
@@ -11,7 +11,7 @@
   <link rel="manifest" href="./app.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./style.css?v=14">
-  <script type="module" src="./app.js?v=15"></script>
+  <script type="module" src="./app.js?v=16"></script>
   <title>英语搭子 · 对话听力</title>
 </head>
 <body>
@@ -126,6 +126,10 @@
   <template id="backupChoice">
     <label class="cloud-consent"><input type="checkbox" autocomplete="off">主服务额度不足或生成限速时，允许切换到 Hugging Face 备用配音</label>
     <p class="small" hidden>已开启自动接续。遇到限速后，本次尚未配音的部分会接着使用备用服务，已完成的录音保留。需要新配音的英文和音色可能发给社区维护的 <a href="https://huggingface.co/spaces/kinabraytan/kokoro-tts-server" target="_blank" rel="noopener noreferrer">Kokoro 服务</a>。女声换为 Bella，男声仍用 Michael；服务繁忙时也可能排队。录音可通过服务生成的链接访问，保留时间未注明。此选择会记在当前浏览器。</p>
+    <div class="secondary-choice" hidden>
+      <label class="cloud-consent secondary-consent"><input type="checkbox" autocomplete="off">第一备用也繁忙时，允许第二备用自动接续</label>
+      <p class="small secondary-details" hidden>第一备用限流、暂不可用或等待结果超过 30 秒时，允许把尚未完成的英文和音色发给 <a href="https://huggingface.co/spaces/Pendrokar/Kokoro-TTS" target="_blank" rel="noopener noreferrer">Pendrokar 的 Kokoro 服务</a>，使用 Heart 女声和 Michael 男声，无需下载模型。录音可能通过生成的链接访问，保留时间未注明。超时切换不能保证原服务已停止处理。两家备用同在 Hugging Face，仍可能同时繁忙；全部不可用时保留进度供重试。此选择会记在当前浏览器。</p>
+    </div>
   </template>
   <audio id="audio" preload="auto" playsinline></audio>
 </body></html>

@@ -246,7 +246,7 @@ export const cloudClipKey = (voice,text) => JSON.stringify([voice,text]);
 
 // Only call after the user approves this selection. Cache by exact text AND voice
 // so retries, repeated sentences and edits reuse matching audio.
-export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allowBackup = false,routeState = {},onReady = () => {}} = {}) {
+export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allowBackup = false,allowSecondary = false,routeState = {},onReady = () => {}} = {}) {
   if (signal.aborted) throw signal.reason || cancelled();
   const quotaDay = new Date().toISOString().slice(0,10);
   if (routeState.day !== quotaDay) {
@@ -291,11 +291,15 @@ export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allo
     else pending.push(task);
   }
   let next = 0, reserved = 0, failure = null, budgetBlocked = false;
+  let preferSecondary = allowBackup && allowSecondary && routeState.backupCooldownUntil > Date.now();
   let rateLimited = allowBackup && routeState.primaryCooldownUntil > Date.now()
     ? new VoiceRateLimitError(routeState.primaryCooldownUntil - Date.now()) : null;
   async function primaryWorker() {
-    while (!signal.aborted && !failure && !budgetBlocked && (!allowBackup || !routeState.primaryExhausted && !rateLimited) && next < pending.length) {
+    while (!signal.aborted && !failure && !budgetBlocked && !preferSecondary && (!allowBackup || !routeState.primaryExhausted && !rateLimited) && next < pending.length) {
       const task = pending[next];
+      // A prior attempt can already have accepted Gradio work. Resume that
+      // route below, even if the primary service's cooldown has since ended.
+      if (task.jobs.some(job => job?.backup || job?.secondary)) { next++; continue; }
       // Reserve both in-flight jobs before submitting either, then charge only
       // accepted jobs. Retries reuse accepted UUIDs and completed audio pieces.
       if (routeState.primaryCharacters + reserved + task.needed > 5000) {
@@ -350,8 +354,52 @@ export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allo
       progress(task,'huggingface','switching',Math.max(0,(routeState.primaryCooldownUntil || 0) - Date.now()),
         budgetBlocked ? 'budget' : routeState.primaryExhausted ? 'daily-quota' : 'rate-limit');
     }
-    const {synthesizeBackupLine} = await import('./backup-voice.js?v=15');
+    const {synthesizeBackupLine} = await import('./backup-voice.js?v=16');
     if (signal.aborted) throw signal.reason || cancelled();
+    const hasAccepted = state => state?.eventId || state?.event_id || state?.resultURL || state?.blob ||
+      state?.parts?.some(piece => piece.eventId || piece.event_id || piece.resultURL || piece.blob);
+    const isBusy = error => error?.name === 'BackupVoiceBusyError' &&
+      ['backup-rate-limit','backup-timeout','backup-unavailable'].includes(error.reason);
+    async function fallbackPart(part,job) {
+      async function secondary() {
+        if (signal.aborted) throw signal.reason || cancelled();
+        if (!allowSecondary) throw Error('另一备用配音服务尚未获得本次授权，请先勾选同意。');
+        const {synthesizeSecondaryLine} = await import('./secondary-voice.js?v=16');
+        if (signal.aborted) throw signal.reason || cancelled();
+        progress(task,'huggingface-secondary','synthesize');
+        const blob = await synthesizeSecondaryLine(part,task.voice,signal,{
+          job:job.secondary || (job.secondary = {}),maxWaitMs:90000
+        });
+        if (signal.aborted) throw signal.reason || cancelled();
+        return {blob,voiceProvider:'huggingface-secondary'};
+      }
+      // Once another provider accepted a part, retry that same task instead of
+      // submitting a new duplicate while the original Space is still busy.
+      if (hasAccepted(job.secondary)) return secondary();
+      if (!preferSecondary || hasAccepted(job.backup)) {
+        progress(task,'huggingface','synthesize');
+        try {
+          const blob = await synthesizeBackupLine(part,task.voice,signal,{
+            job:job.backup || (job.backup = {}),
+            // On a retry during cooldown, briefly retrieve an already accepted
+            // result. This never posts a new job; known audio gets normal time.
+            maxWaitMs:preferSecondary && !job.backup.parts?.every(piece => piece.blob || piece.resultURL)
+              ? 1000 : allowSecondary ? 30000 : 90000
+          });
+          if (signal.aborted) throw signal.reason || cancelled();
+          return {blob,voiceProvider:'huggingface'};
+        } catch (error) {
+          if (signal.aborted) throw signal.reason || cancelled();
+          if (!isBusy(error) || !allowSecondary) throw error;
+          routeState.backupCooldownUntil = Math.max(routeState.backupCooldownUntil || 0,error.retryAt || Date.now()+60000);
+          routeState.backupBusyReason = error.reason;
+          preferSecondary = true;
+        }
+      }
+      progress(task,'huggingface-secondary','switching',Math.max(0,(routeState.backupCooldownUntil || 0)-Date.now()),
+        routeState.backupBusyReason || 'backup-unavailable');
+      return secondary();
+    }
     const parts = [];
     for (const [i,part] of task.parts.entries()) {
       if (signal.aborted) throw signal.reason || cancelled();
@@ -364,11 +412,9 @@ export async function renderCloudDialogue(lines,voices,clips,signal,onLine,{allo
           job.blob = await synthesizeCloudLine(part,task.voice,signal,{jobs:[job]});
           job.voiceProvider = 'tts.ai';
         } else {
-          progress(task,'huggingface','synthesize');
-          const blob = await synthesizeBackupLine(part,task.voice,signal);
+          const clip = await fallbackPart(part,job);
           if (signal.aborted) throw signal.reason || cancelled();
-          job.blob = blob;
-          job.voiceProvider = 'huggingface';
+          Object.assign(job,clip);
         }
       }
       parts.push(job.blob);

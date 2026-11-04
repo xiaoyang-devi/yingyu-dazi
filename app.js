@@ -2,12 +2,12 @@ import {parseText} from './intake.js?v=14';
 import {translateLocally, cancelLocalTranslation} from './local-translate.js?v=8';
 import {LOCAL_VOICES, renderLocalVoice, releaseLocalVoice} from './local-voice.js?v=7';
 import {planOnline, translateOnline, isReadableEnglish} from './online-translate.js?v=13';
-import {cloudPanel} from './cloud-panel.js?v=15';
-import {CLOUD_VOICES,renderCloudDialogue} from './cloud-voice.js?v=15';
+import {cloudPanel} from './cloud-panel.js?v=16';
+import {CLOUD_VOICES,renderCloudDialogue} from './cloud-voice.js?v=16';
 import {createLocalReader} from './native-speech.js';
 
-import {savePracticeCard, updatePracticePosition} from './library.js?v=15';
-import {practiceShelf} from './library-view.js?v=15';
+import {savePracticeCard, updatePracticePosition} from './library.js?v=16';
+import {practiceShelf} from './library-view.js?v=16';
 
 const id = key => document.getElementById(key);
 const source = id('source'), audio = id('audio');
@@ -38,6 +38,9 @@ translationBackup.onchange = () => {
 const backupKey = 'yingyu-dazi:huggingface-backup:v1';
 let backupAllowed = false;
 try { backupAllowed = localStorage.getItem(backupKey) === 'yes'; } catch {}
+const secondaryKey = 'yingyu-dazi:secondary-voice:v1';
+let secondaryAllowed = false;
+try { secondaryAllowed = localStorage.getItem(secondaryKey) === 'yes'; } catch {}
 const backupControls = [...document.querySelectorAll('[data-backup-control]')];
 for (const container of backupControls) {
   container.append(id('backupChoice').content.cloneNode(true));
@@ -52,22 +55,43 @@ for (const container of backupControls) {
     updateOnlinePlan();
     cloud.refresh();
   };
+  const secondary = container.querySelector('.secondary-consent input');
+  const secondaryDetails = container.querySelector('.secondary-details');
+  secondary.id = container.dataset.backupControl + 'Secondary';
+  secondaryDetails.id = secondary.id + 'Details';
+  secondary.setAttribute('aria-describedby',secondaryDetails.id);
+  secondary.onchange = () => {
+    secondaryAllowed = secondary.checked;
+    try { localStorage.setItem(secondaryKey,secondaryAllowed ? 'yes' : 'no'); } catch {}
+    updateBackupControls();
+    updateOnlinePlan();
+    cloud.refresh();
+  };
 }
 function updateBackupControls() {
   for (const container of backupControls) {
     container.querySelector('input').checked = backupAllowed;
     container.querySelector('p').hidden = !backupAllowed;
+    container.querySelector('.secondary-choice').hidden = !backupAllowed;
+    container.querySelector('.secondary-consent input').checked = secondaryAllowed;
+    container.querySelector('.secondary-details').hidden = !secondaryAllowed;
   }
   id('reviewDisclosure').textContent = '点击下方配音按钮，将已准备好的英文和音色交给 TTS.ai。' +
-    (backupAllowed ? '额度不足或生成限速时，由已启用的 Hugging Face 社区服务接续。' : '') + '未补的句子会跳过。';
+    (backupAllowed ? '额度不足或生成限速时，由已启用的 Hugging Face 社区服务接续。' : '') +
+    (backupAllowed && secondaryAllowed ? '第一备用繁忙或等待结果超过 30 秒时，也允许第二备用接续。' : '') + '未补的句子会跳过。';
 }
 updateBackupControls();
 function serviceVoice(voice,provider) {
   if (provider === 'huggingface') return '备用配音 · ' + (voice === 'af_heart' ? 'Bella 女声' : 'Michael 男声');
-  if (provider === 'mixed') return '含备用配音 · ' + (voice === 'af_heart' ? 'Heart / Bella 女声' : 'Michael 男声');
+  if (provider === 'huggingface-secondary') return '第二备用 · ' + (voice === 'af_heart' ? 'Heart 女声' : 'Michael 男声');
+  if (provider === 'mixed') return '含多来源配音 · ' + (voice === 'af_heart' ? '自然女声' : '自然男声');
   return voiceLabels[voice];
 }
 function voiceProgress(status,fallback) {
+  if (status.phase === 'switching' && status.reason?.startsWith('backup-')) {
+    const reason = status.reason === 'backup-timeout' ? '第一备用等待结果超过 30 秒' : '第一备用服务繁忙';
+    return reason + '，正在切换第二备用自然配音。已完成的录音会保留。';
+  }
   if (status.phase === 'switching') return (status.reason === 'rate-limit' ? '主服务生成限速' : '主服务配音额度不足') +
     '，正在切换备用自然配音。已完成的录音会保留。';
   if (status.phase === 'waiting') return '配音服务限制了生成频率，约 ' + Math.max(1,Math.ceil(status.waitMs / 1000)) +
@@ -114,6 +138,7 @@ function updateOnlinePlan() {
         (translationBackup.checked ? '优先用 MyMemory，额度用完时由 OPUS Translate 接译剩余正文。' : '由 MyMemory 翻译。') + '英文交给 TTS.ai 配音。'
       : '本次直接将需要配音的英文交给 TTS.ai。';
     if (backupAllowed) id('onlineScope').textContent += '配音额度不足或生成限速时可切换到备用声音。';
+    if (backupAllowed && secondaryAllowed) id('onlineScope').textContent += '第一备用繁忙时，还会自动尝试已允许的第二备用。';
     id('quickIntro').textContent = onlineIssue || '自动翻译并按角色配音。默认交替使用 Heart 女声和 Michael 男声，可在下方调整。';
     id('generate').textContent = reviewLines && needed ? '同意重试待译句并生成自然配音' : '同意并生成自然配音';
   }
@@ -490,7 +515,7 @@ id('singleMessage').onchange = () => {
 function setBusy(value) {
   working = value;
   translationBackup.disabled = value;
-  for (const container of backupControls) container.querySelector('input').disabled = value;
+  for (const container of backupControls) for (const input of container.querySelectorAll('input')) input.disabled = value;
   id('demo').disabled = id('applyProof').disabled = value;
   id('cloudPanel').inert = id('proofPanel').inert = value;
   for (const field of id('reviewRows').querySelectorAll('textarea')) field.disabled = value;
@@ -615,6 +640,7 @@ async function startGeneration(bypassCache,useReady = false) {
   }
   const token = ++jobVersion, input = parsed.messages, voices = new Map(choices()), original = source.value, selection = id('rangeFrom').value + '-' + id('rangeTo').value;
   const allowBackup = online && backupAllowed;
+  const allowSecondary = allowBackup && secondaryAllowed;
   const allowTranslationBackup = online && translationBackup.checked;
   const live = () => token === jobVersion;
   cloud.cancel();
@@ -659,7 +685,7 @@ async function startGeneration(bypassCache,useReady = false) {
         const message = voiceProgress(status,'已完成 ' + completed + ' / ' + lines.length + ' 句 · ' + serviceVoice(voice,provider));
         showJob('synthesize','online','生成自然配音 · 可边生成边听',message,{unit:'lines',loaded:completed,total:lines.length});
         if (status.phase === 'waiting' || status.phase === 'switching') note(id('streamStatus'),message);
-      },{allowBackup,routeState:onlineRoute,onReady(i,line) {
+      },{allowBackup,allowSecondary,routeState:onlineRoute,onReady(i,line) {
         if (!live() || card !== streamingCard) return;
         card.lines[i] = line;
         card.urls[i] = URL.createObjectURL(line.blob);
@@ -768,7 +794,7 @@ const cloud = cloudPanel((previous,lines,voices) => {
   openCard({title,lines,voices,cloud:true,resumeIndex:active});
   note(id('playerNote'),'自然配音已就绪，点「播放」听对话。');
   showPlayer();
-},() => backupAllowed);
+},() => backupAllowed,() => backupAllowed && secondaryAllowed);
 const proof = id('proofPanel');
 const shortReply = text => /^\p{Script=Han}{1,2}[。！？!?，,]*$/u.test(text.trim());
 proof.ontoggle = () => {
@@ -852,7 +878,7 @@ function openCard(next,keepCloudVoices = false) {
   if (textOnly && next.online) id('cloudPanel').open = true;
   id('cardTitle').textContent = next.title;
   id('cardMeta').textContent = (next.cloud ? 'Kokoro 在线配音 · ' : textOnly ? '英文已就绪 · ' : next.native ? '本机系统声音 · ' : next.demo ? 'Heart × Michael 双人试听 · ' : '已配音 · ') + next.lines.length + ' 段对白';
-  const backupCount = next.lines.filter(line => ['huggingface','mixed'].includes(line.voiceProvider)).length;
+  const backupCount = next.lines.filter(line => ['huggingface','huggingface-secondary','mixed'].includes(line.voiceProvider)).length;
   if (backupCount) id('cardMeta').textContent += ' · ' + backupCount + ' 段含 Hugging Face 备用配音';
   id('player').hidden = false;
   id('cardActions').hidden = !!next.demo;
@@ -897,7 +923,7 @@ function updateStreamingCard() {
   id('stopStreaming').hidden = !card.generating;
   id('backToGenerate').hidden = !!card.generating;
   id('cardMeta').textContent = 'Kokoro 在线配音 · ' + (unfinished ? '已完成 ' + count + ' / ' + total + ' 句' : total + ' 段对白');
-  const backupCount = card.lines.filter(line => ['huggingface','mixed'].includes(line.voiceProvider)).length;
+  const backupCount = card.lines.filter(line => ['huggingface','huggingface-secondary','mixed'].includes(line.voiceProvider)).length;
   if (backupCount) id('cardMeta').textContent += ' · ' + backupCount + ' 段含备用配音';
   if (card.generating) note(id('streamStatus'),count ? '可以先播放已完成的句子，后面的会继续生成。' : '正在准备开头的录音，完成一句就能播放。');
   id('savePractice').disabled = !!unfinished;
